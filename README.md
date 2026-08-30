@@ -88,6 +88,10 @@ scripts/      Manifest status and explicit rebuild helpers
 .github/      GitHub Actions shell-matrix workflow
 ```
 
+## CI And Releases
+
+GitHub Actions builds release binaries for Windows x64/x86/ARM64, macOS Intel/Apple Silicon, and Linux x64 on every branch push. Push a version tag in the form `vX.Y.Z` to create a GitHub Release containing all six binaries.
+
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
