@@ -56,6 +56,7 @@ fn cmd_runtime_discards_the_macro_name_before_forwarding_arguments() {
     fs::write(&source,"[Common]\ncat=FirstAvailable(bat, cat)\n[Windows]\npkg=scoop\nrfg=rg @*\n").unwrap();
     let mut o=options(source,Platform::Windows); o.context.shell=Shell::Cmd;
     let model=compile_model(&o).unwrap(); let generated=backend::generate(&model.context,&model.definitions).unwrap();
+    assert!(!generated.primary.starts_with("::"));
     let runtime=&generated.sibling.unwrap().1;
     assert!(runtime.contains(":cat\nshift /1\n"));
     assert!(runtime.contains("call :__aliasc_find_external \"bat\" __aliasc_exec_cat"));
