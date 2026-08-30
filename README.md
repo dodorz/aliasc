@@ -88,6 +88,10 @@ scripts/      Manifest status and explicit rebuild helpers
 .github/      GitHub Actions shell-matrix workflow
 ```
 
+## License
+
+This project is licensed under the [MIT License](LICENSE).
+
 ## Security and Execution Model
 
 Portable templates are parsed into structured IR rather than emitted through `eval` or `Invoke-Expression`. `FirstAvailable` is resolved on first alias invocation and cached for the current shell session; it is never probed during compilation or shell startup.
