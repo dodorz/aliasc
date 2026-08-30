@@ -5,7 +5,11 @@ on:
     branches:
       - "**"
     tags:
-      - "v*"
+      - "*"
+
+concurrency:
+  group: build-release-${{ github.ref_type }}-${{ github.sha }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -30,7 +34,7 @@ jobs:
             target: aarch64-pc-windows-msvc
             asset: aliasc-aarch64-pc-windows-msvc.exe
           - name: macOS Intel
-            os: macos-13
+            os: macos-14
             target: x86_64-apple-darwin
             asset: aliasc-x86_64-apple-darwin
           - name: macOS Apple Silicon
@@ -74,7 +78,7 @@ jobs:
   release:
     name: Publish GitHub release
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
       contents: write
