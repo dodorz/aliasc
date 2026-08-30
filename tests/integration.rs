@@ -77,6 +77,15 @@ fn cmd_runtime_renders_command_substitution_as_a_single_argument() {
 }
 
 #[test]
+fn powershell_omits_empty_forwarded_arguments() {
+    let d=tempdir().unwrap(); let source=d.path().join("alias");
+    fs::write(&source,"[Common]\nimplicit=echo hello\nexplicit=echo hello @*\n").unwrap();
+    let mut o=options(source,Platform::Windows); o.context.shell=Shell::Powershell;
+    let model=compile_model(&o).unwrap(); let generated=backend::generate(&model.context,&model.definitions).unwrap();
+    assert!(generated.primary.contains("if ($AliasArgs.Count -gt 0) { & (__aliasc_path 'echo') (__aliasc_path 'hello') @AliasArgs } else { & (__aliasc_path 'echo') (__aliasc_path 'hello') }"));
+}
+
+#[test]
 fn manifest_tracks_missing_optional_inputs_and_all_outputs() {
     let d=tempdir().unwrap(); let source=d.path().join("alias"); let output=d.path().join("aliases.mac");
     fs::write(&source,"[Common]\nx=printf x\n").unwrap();

@@ -47,7 +47,10 @@ jobs:
           "[Common]`nhello=echo hello" | Set-Content .ci/alias
           .\target\debug\aliasc.exe compile --shell powershell --platform windows --source .ci/alias --output .ci/aliases.ps1
           . .\.ci\aliases.ps1
-          hello | Should -Be 'hello'
+          $actual = @(hello)
+          if ($actual.Count -ne 1 -or $actual[0] -ne 'hello') {
+            throw "Expected one 'hello' result, got: $($actual -join ', ')"
+          }
       - shell: cmd
         run: |
           target\debug\aliasc.exe compile --shell cmd --platform windows --source .ci\alias --output .ci\aliases.mac
