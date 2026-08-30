@@ -1,0 +1,16 @@
+include "child.alias"
+
+[Common]
+echo=printf "hello ${USER}" @1
+cat=FirstAvailable(missing, cat)
+setenv=SetEnv(HELLO="one two")
+run=WithEnv(HELLO=temporary) printf ${HELLO}
+
+[UNIX]
+platform=printf unix
+
+[Windows]
+legacy=for /f "tokens=*" %1
+
+[Bash]
+ignored=Shell:bash[echo bad]
