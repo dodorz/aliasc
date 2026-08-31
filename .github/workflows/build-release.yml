@@ -45,6 +45,11 @@ jobs:
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             asset: aliasc-x86_64-unknown-linux-gnu
+          - name: Android ARM64 (Termux)
+            os: ubuntu-latest
+            target: aarch64-linux-android
+            asset: aliasc-aarch64-linux-android
+            android_ndk: true
 
     runs-on: ${{ matrix.os }}
 
@@ -55,8 +60,27 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Set up Android NDK
+        if: matrix.android_ndk
+        id: android-ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27c
+
+      - name: Configure Android linker
+        if: matrix.android_ndk
+        shell: bash
+        run: |
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=${{ steps.android-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang" >> "$GITHUB_ENV"
+
       - name: Build release binary
         run: cargo build --locked --release --target ${{ matrix.target }}
+
+      - name: Verify Android ARM64 binary
+        if: matrix.android_ndk
+        shell: bash
+        run: |
+          readelf -h "target/${{ matrix.target }}/release/aliasc" | grep -Eq 'Machine:.*AArch64'
 
       - name: Package Windows binary
         if: runner.os == 'Windows'
