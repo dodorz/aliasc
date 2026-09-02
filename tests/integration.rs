@@ -184,7 +184,7 @@ fn posix_ordinary_same_named_command_does_not_recurse() {
     let model=compile_model(&options(source,Platform::Linux)).unwrap(); let generated=backend::generate(&model.context,&model.definitions).unwrap(); fs::write(&output,&generated.primary).unwrap();
     let old_path=std::env::var("PATH").unwrap_or_default(); let result=Command::new("bash").arg("-c").arg(". \"$1\"; dir --flag").arg("bash").arg(&output).env("PATH",format!("{}:{}",root.display(),old_path)).output().unwrap();
     assert!(result.status.success(),"{}",String::from_utf8_lossy(&result.stderr));
-    assert_eq!(String::from_utf8_lossy(&result.stdout),"external dir --color=auto\\n");
+    assert_eq!(String::from_utf8_lossy(&result.stdout),"external dir --color=auto\n");
 }
 
 #[test]
