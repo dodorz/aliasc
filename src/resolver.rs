@@ -20,7 +20,7 @@ pub fn resolve(options:&CompileOptions)->Result<Compilation,Vec<Diagnostic>> {
         let result=if legacy && !(raw.body.trim_start().starts_with("SetEnv(") || raw.body.trim_start().starts_with("UnsetEnv(")) { Ok(Template::LegacyCmdTemplate(raw.body.clone())) } else { legacy=false; dsl::parse_template(&raw.body,&raw.span,&raw.include_stack) };
         match result { Ok(mut template)=>{annotate_first_available(&mut template,&raw.name);let d=Definition{name:raw.name,template,span:raw.span,legacy,context:st.options.context.clone()};if let Some(i)=positions.get(&d.name).copied(){resolved[i]=d}else{positions.insert(d.name.clone(),resolved.len());resolved.push(d)}}, Err(e)=>st.diagnostics.push(e) }
     }
-fn annotate_first_available(template:&mut Template,name:&str){if let Template::FirstAvailable(candidates)=template{for candidate in candidates{candidate.bypass_shell_function=first_command_word(candidate)==Some(name);}}}
+fn annotate_first_available(template:&mut Template,name:&str){match template{Template::Command(command)=>{command.bypass_shell_function=first_command_word(command)==Some(name);},Template::WithEnv{body:Some(command),..}=>{command.bypass_shell_function=first_command_word(command)==Some(name);},Template::FirstAvailable(candidates)=>{for candidate in candidates{candidate.bypass_shell_function=first_command_word(candidate)==Some(name);}},_=>{}}}
 fn first_command_word(candidate:&CommandTemplate)->Option<&str>{let invocation=candidate.pipeline.commands.first()?;let argument=invocation.arguments.first()?;match argument.segments.as_slice(){[ArgumentSegment::Literal(value)]=>Some(value.as_str()),_=>None}}
     if st.diagnostics.iter().any(|x|x.severity==Severity::Error){return Err(st.diagnostics)}
 

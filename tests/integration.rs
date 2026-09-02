@@ -98,8 +98,7 @@ fn unix_backend_bypasses_same_named_first_available_command_only() {
     let generated=backend::generate(&model.context,&model.definitions).unwrap();
     assert!(generated.primary.contains("if __aliasc_is_external 'ls'; then __aliasc_first_ls=0"));
     assert!(generated.primary.contains("0) command 'ls' \"$@\""));
-    assert!(generated.primary.contains("dir() {\n  'dir' '--color=auto' \"$@\""));
-    assert!(!generated.primary.contains("dir() {\n  command 'dir'"));
+    assert!(generated.primary.contains("dir() {\n  command 'dir' '--color=auto' \"$@\""));
 }
 #[test]
 fn ordinary_aliases_and_first_available_candidates_keep_normal_rendering() {
@@ -174,6 +173,20 @@ fn posix_first_available_executes_external_same_named_command_without_recursion(
     assert!(result.status.success(),"{}",String::from_utf8_lossy(&result.stderr));
     assert_eq!(String::from_utf8_lossy(&result.stdout),"fallback bar --flag\n");
 }
+#[cfg(unix)]
+#[test]
+fn posix_ordinary_same_named_command_does_not_recurse() {
+    use std::{os::unix::fs::PermissionsExt, process::Command};
+    let d=tempdir().unwrap(); let root=d.path(); let source=root.join("alias"); let output=root.join("aliases.sh");
+    fs::write(root.join("dir"),"#!/bin/sh\nprintf 'external dir %s\\n' \"$1\"\n").unwrap();
+    fs::set_permissions(root.join("dir"),fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(&source,"[Common]\ndir=dir --color=auto\n").unwrap();
+    let model=compile_model(&options(source,Platform::Linux)).unwrap(); let generated=backend::generate(&model.context,&model.definitions).unwrap(); fs::write(&output,&generated.primary).unwrap();
+    let old_path=std::env::var("PATH").unwrap_or_default(); let result=Command::new("bash").arg("-c").arg(". \"$1\"; dir --flag").arg("bash").arg(&output).env("PATH",format!("{}:{}",root.display(),old_path)).output().unwrap();
+    assert!(result.status.success(),"{}",String::from_utf8_lossy(&result.stderr));
+    assert_eq!(String::from_utf8_lossy(&result.stdout),"external dir --color=auto\\n");
+}
+
 #[test]
 fn manifest_tracks_missing_optional_inputs_and_all_outputs() {
     let d=tempdir().unwrap(); let source=d.path().join("alias"); let output=d.path().join("aliases.mac");
