@@ -1,4 +1,4 @@
-use crate::{context::{known_section, shell_section}, default_shortcut_map, dsl::{self, Diagnostic, RawDefinition, Severity, SourceSpan, Template}, Compilation, CompileOptions, Definition};
+use crate::{context::{known_section, shell_section}, default_shortcut_map, dsl::{self, ArgumentSegment, CommandTemplate, Diagnostic, RawDefinition, Severity, SourceSpan, Template}, Compilation, CompileOptions, Definition};
 use serde::Serialize;
 use std::{collections::HashMap, fs, path::{Path, PathBuf}, time::UNIX_EPOCH};
 
@@ -18,9 +18,12 @@ pub fn resolve(options:&CompileOptions)->Result<Compilation,Vec<Diagnostic>> {
         let active=raw.local || raw.section.as_ref().is_some_and(|s|st.options.context.section_active(s)); if !active {continue}
         let mut legacy=raw.section.as_ref().is_some_and(|x|x.eq_ignore_ascii_case("windows"));
         let result=if legacy && !(raw.body.trim_start().starts_with("SetEnv(") || raw.body.trim_start().starts_with("UnsetEnv(")) { Ok(Template::LegacyCmdTemplate(raw.body.clone())) } else { legacy=false; dsl::parse_template(&raw.body,&raw.span,&raw.include_stack) };
-        match result { Ok(template)=>{let d=Definition{name:raw.name,template,span:raw.span,legacy,context:st.options.context.clone()};if let Some(i)=positions.get(&d.name).copied(){resolved[i]=d}else{positions.insert(d.name.clone(),resolved.len());resolved.push(d)}}, Err(e)=>st.diagnostics.push(e) }
+        match result { Ok(mut template)=>{annotate_first_available(&mut template,&raw.name);let d=Definition{name:raw.name,template,span:raw.span,legacy,context:st.options.context.clone()};if let Some(i)=positions.get(&d.name).copied(){resolved[i]=d}else{positions.insert(d.name.clone(),resolved.len());resolved.push(d)}}, Err(e)=>st.diagnostics.push(e) }
     }
+fn annotate_first_available(template:&mut Template,name:&str){if let Template::FirstAvailable(candidates)=template{for candidate in candidates{candidate.bypass_shell_function=first_command_word(candidate)==Some(name);}}}
+fn first_command_word(candidate:&CommandTemplate)->Option<&str>{let invocation=candidate.pipeline.commands.first()?;let argument=invocation.arguments.first()?;match argument.segments.as_slice(){[ArgumentSegment::Literal(value)]=>Some(value.as_str()),_=>None}}
     if st.diagnostics.iter().any(|x|x.severity==Severity::Error){return Err(st.diagnostics)}
+
     Ok(Compilation{definitions:resolved,diagnostics:st.diagnostics,tracked_inputs:dedup_tracked(st.tracked),includes:st.includes,source,local_path:if options.local{Some(local)}else{None},shortcut_map:shortcut,context:options.context.clone()})
 }
 fn visit(st:&mut State<'_>,path:&Path,stack:&mut Vec<PathBuf>,local:bool,origin:Option<SourceSpan>){let path=absolute(path);if stack.contains(&path){let mut chain=stack.clone();chain.push(path.clone());st.diagnostics.push(Diagnostic::error(origin.unwrap_or(SourceSpan{file:path.clone(),line:1,column:1}),"include cycle detected",chain));return}track(st,&path);let text=match fs::read_to_string(&path){Ok(v)=>v,Err(_)=>{let warning_span=origin.unwrap_or(SourceSpan{file:path.clone(),line:1,column:1});if stack.is_empty() && !local {st.diagnostics.push(Diagnostic::error(warning_span,format!("source `{}` does not exist",path.display()),Vec::new()));}else if !local{st.diagnostics.push(Diagnostic::warning(warning_span,format!("optional include `{}` does not exist",path.display()),stack.clone()));}return}};if local{st.local_seen=true}else if !stack.is_empty(){st.includes.push(path.clone())};stack.push(path.clone());let mut section:Option<String>=None;
