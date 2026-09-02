@@ -166,13 +166,13 @@ fn posix_first_available_executes_external_same_named_command_without_recursion(
     let model=compile_model(&options(source,Platform::Linux)).unwrap(); let generated=backend::generate(&model.context,&model.definitions).unwrap(); fs::write(&output,&generated.primary).unwrap();
     let old_path=std::env::var("PATH").unwrap_or_default(); let result=Command::new("bash").arg("-c").arg(". \"$1\"; foo --flag").arg("bash").arg(&output).env("PATH",format!("{}:{}",root.display(),old_path)).output().unwrap();
     assert!(result.status.success(),"{}",String::from_utf8_lossy(&result.stderr));
-    assert_eq!(String::from_utf8_lossy(&result.stdout),"external foo --flag\\n");
+    assert_eq!(String::from_utf8_lossy(&result.stdout),"external foo --flag\n");
     fs::remove_file(root.join("foo")).unwrap();
     fs::write(root.join("bar"),"#!/bin/sh\nprintf 'fallback bar %s\\n' \"$1\"\n").unwrap();
     fs::set_permissions(root.join("bar"),fs::Permissions::from_mode(0o755)).unwrap();
     let result=Command::new("bash").arg("-c").arg(". \"$1\"; foo --flag").arg("bash").arg(&output).env("PATH",format!("{}:{}",root.display(),old_path)).output().unwrap();
     assert!(result.status.success(),"{}",String::from_utf8_lossy(&result.stderr));
-    assert_eq!(String::from_utf8_lossy(&result.stdout),"fallback bar --flag\\n");
+    assert_eq!(String::from_utf8_lossy(&result.stdout),"fallback bar --flag\n");
 }
 #[test]
 fn manifest_tracks_missing_optional_inputs_and_all_outputs() {
