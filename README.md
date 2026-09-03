@@ -63,6 +63,7 @@ posix, bash, zsh, fish, nu, powershell, pwsh, cmd
 - `alias.local` beside the main source is loaded automatically after the main include tree unless `--no-local` is supplied.
 - `ShortcutMap.yaml` beside the source is read by default unless `--no-shortcut-map` is supplied.
 - Section activation depends on platform, distro, and environment, not on `--shell`.
+- Alias definition names are case-insensitive. A definition such as `PiWeb=...` can be invoked as `piweb`, `Piweb`, or any other ASCII case combination; on case-sensitive shells, aliasc emits the corresponding forwarding entry points.
 - `[Windows]` is the v1 legacy cmd-template compatibility section. Shell-specific sections are reserved and inactive in v1.
 
 Every successful compilation writes a manifest containing the resolved target context, tracked inputs, generated outputs, and content hashes.

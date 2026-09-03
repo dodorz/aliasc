@@ -6,6 +6,40 @@ fn context(platform: Platform) -> Context { Context { shell: Shell::Posix, platf
 fn options(source: PathBuf, platform: Platform) -> CompileOptions { CompileOptions { context: context(platform), source, local: true, shortcut_map: None } }
 
 #[test]
+fn definition_names_are_case_insensitive_and_last_definition_wins() {
+    let d=tempdir().unwrap(); let source=d.path().join("alias");
+    fs::write(&source,"[Common]\nPiWeb=printf first\npiweb=printf second\n").unwrap();
+    let model=compile_model(&options(source,Platform::Linux)).unwrap();
+    assert_eq!(model.definitions.len(),1);
+    assert_eq!(model.definitions[0].name,"piweb");
+    let generated=backend::generate(&model.context,&model.definitions).unwrap();
+    assert!(generated.primary.contains("piweb() {"));
+    assert!(generated.primary.contains("Piweb() {"));
+    assert!(generated.primary.contains("PIWEB() {"));
+    assert!(generated.primary.contains("'second'"));
+}
+
+#[cfg(unix)]
+#[test]
+fn posix_alias_name_variants_execute_the_same_definition() {
+    use std::process::Command;
+    let d=tempdir().unwrap(); let root=d.path(); let source=root.join("alias"); let output=root.join("aliases.sh");
+    fs::write(&source,"[Common]\nPiWeb=printf ok\n").unwrap();
+    let model=compile_model(&options(source,Platform::Linux)).unwrap(); let generated=backend::generate(&model.context,&model.definitions).unwrap(); fs::write(&output,&generated.primary).unwrap();
+    let result=Command::new("bash").arg("-c").arg(". \"$1\"; piweb; PIWEB").arg("bash").arg(&output).output().unwrap();
+    assert!(result.status.success(),"{}",String::from_utf8_lossy(&result.stderr));
+    assert_eq!(String::from_utf8_lossy(&result.stdout),"ok\nok\n");
+}
+#[test]
+fn first_available_same_named_candidate_is_case_insensitive() {
+    let d=tempdir().unwrap(); let source=d.path().join("alias");
+    fs::write(&source,"[Common]\nPiWeb=FirstAvailable(piweb, fallback)\n").unwrap();
+    let model=compile_model(&options(source,Platform::Linux)).unwrap();
+    let definition=&model.definitions[0];
+    let Template::FirstAvailable(candidates)=&definition.template else { panic!("expected FirstAvailable") };
+    assert!(candidates[0].bypass_shell_function);
+}
+#[test]
 fn resolver_expands_relative_duplicate_includes_and_local_override() {
     let d=tempdir().unwrap(); let root=d.path();
     fs::write(root.join("child"), "[Common]\nfrom_child=printf child\n").unwrap();
