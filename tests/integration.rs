@@ -125,7 +125,7 @@ fn zsh_executes_nested_same_named_commands_without_recursion() {
     let path=std::env::var("PATH").unwrap_or_default();
     let result=Command::new("zsh").arg("-f").arg("-c").arg("source \"$1\"; aichat").arg("zsh").arg(&output).env("PATH",format!("{}:{}",root.display(),path)).output().unwrap();
     assert!(result.status.success(),"{}",String::from_utf8_lossy(&result.stderr));
-    assert_eq!(String::from_utf8_lossy(&result.stdout),"outer -m model\\n");
+    assert_eq!(String::from_utf8_lossy(&result.stdout),"outer -m model\n");
     assert!(!String::from_utf8_lossy(&result.stderr).contains("maximum nested function level reached"));
 }
 
