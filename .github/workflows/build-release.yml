@@ -15,8 +15,36 @@ permissions:
   contents: read
 
 jobs:
+  prepare-version:
+    name: Prepare release version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Validate and normalize release tag
+        id: version
+        shell: bash
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [[ "$REF_TYPE" == "tag" ]]; then
+            if [[ ! "$REF_NAME" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "Invalid release tag '$REF_NAME'; expected MAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH" >&2
+              exit 1
+            fi
+            version="${REF_NAME#v}"
+          else
+            version=""
+          fi
+          echo "VERSION=$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
   build:
     name: ${{ matrix.name }}
+    needs: prepare-version
+    env:
+      VERSION: ${{ needs.prepare-version.outputs.version }}
     strategy:
       fail-fast: false
       matrix:
@@ -92,6 +120,44 @@ jobs:
         shell: bash
         run: cp "target/${{ matrix.target }}/release/aliasc" "${{ matrix.asset }}"
 
+      - name: Verify Windows release binary version
+        if: github.ref_type == 'tag' && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $output = (& ".\${{ matrix.asset }}" --version | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or $output -ne "aliasc $env:VERSION") {
+            throw "Expected 'aliasc $env:VERSION', got '$output'"
+          }
+
+      - name: Verify Unix release binary version
+        if: github.ref_type == 'tag' && runner.os != 'Windows' && !matrix.android_ndk
+        shell: bash
+        run: |
+          output="$("./${{ matrix.asset }}" --version)"
+          test "$output" = "aliasc $VERSION" || {
+            echo "Expected 'aliasc $VERSION', got '$output'" >&2
+            exit 1
+          }
+
+      - name: Verify Android release binary version
+        if: github.ref_type == 'tag' && matrix.android_ndk
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: default
+          arch: arm64-v8a
+          profile: pixel_2
+          force-avd-creation: true
+          emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect
+          script: |
+            adb push "${{ matrix.asset }}" /data/local/tmp/aliasc
+            adb shell chmod 755 /data/local/tmp/aliasc
+            output="$(adb shell /data/local/tmp/aliasc --version | tr -d '\r')"
+            test "$output" = "aliasc $VERSION" || {
+              echo "Expected 'aliasc $VERSION', got '$output'" >&2
+              exit 1
+            }
+
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
@@ -101,9 +167,11 @@ jobs:
 
   release:
     name: Publish GitHub release
-    needs: build
+    needs: [prepare-version, build]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.prepare-version.outputs.version }}
     permissions:
       contents: write
 

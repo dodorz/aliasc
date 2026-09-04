@@ -37,7 +37,7 @@ pub fn update(force: bool, requested_location: Option<PathBuf>) -> Result<Update
     let release = fetch_release()?;
     let version = normalize_version(&release.tag_name);
 
-    if !force && !is_newer(&version, env!("CARGO_PKG_VERSION")) {
+    if !force && !is_newer(&version, env!("ALIASC_VERSION")) {
         return Ok(UpdateResult {
             path: target,
             version,
@@ -71,7 +71,7 @@ pub fn update(force: bool, requested_location: Option<PathBuf>) -> Result<Update
 fn fetch_release() -> Result<Release, String> {
     let response = ureq::get(RELEASES_URL)
         .set("Accept", "application/vnd.github+json")
-        .set("User-Agent", concat!("aliasc/", env!("CARGO_PKG_VERSION")))
+        .set("User-Agent", concat!("aliasc/", env!("ALIASC_VERSION")))
         .call()
         .map_err(|error| format!("failed to query GitHub releases: {error}"))?;
     let body = response
@@ -83,7 +83,7 @@ fn fetch_release() -> Result<Release, String> {
 fn fetch_asset(url: &str) -> Result<Vec<u8>, String> {
     let response = ureq::get(url)
         .set("Accept", "application/octet-stream")
-        .set("User-Agent", concat!("aliasc/", env!("CARGO_PKG_VERSION")))
+        .set("User-Agent", concat!("aliasc/", env!("ALIASC_VERSION")))
         .call()
         .map_err(|error| format!("failed to download release asset: {error}"))?;
     let mut bytes = Vec::new();

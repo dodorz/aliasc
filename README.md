@@ -91,7 +91,7 @@ scripts/      Manifest status and explicit rebuild helpers
 
 ## CI And Releases
 
-GitHub Actions builds release binaries for Windows x64/x86/ARM64, macOS Intel/Apple Silicon, Linux x64, and Android ARM64 (Termux) on every branch push. Push a version tag such as `0.1.0` or `v0.1.0` to create a GitHub Release containing all seven binaries.
+GitHub Actions builds release binaries for Windows x64/x86/ARM64, macOS Intel/Apple Silicon, Linux x64, and Android ARM64 (Termux) on every branch push. Push a release tag in `MAJOR.MINOR.PATCH` form, such as `0.0.7` or `v0.0.7`, to create a GitHub Release containing all seven binaries. The workflow normalizes an optional `v` prefix and passes the resulting `VERSION` to every build; the binary version, manifest version, and release tag therefore use the same value. Invalid release tags fail before any asset is published.
 
 ## License
 

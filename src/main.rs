@@ -2,7 +2,7 @@ use aliasc::{backend, compile_model, context::{DistroArg, EnvironmentArg, Platfo
 use clap::{Args, Parser, Subcommand};
 use std::{path::PathBuf, process::ExitCode};
 
-#[derive(Parser)] #[command(name="aliasc", version, about="Alias DSL v2 compiler")]
+#[derive(Parser)] #[command(name="aliasc", version=env!("ALIASC_VERSION"), about="Alias DSL v2 compiler")]
 struct Cli { #[command(subcommand)] command: Command }
 #[derive(Subcommand)] enum Command { Compile { #[command(flatten)] input: Input, #[arg(long)] output:PathBuf }, Validate { #[command(flatten)] input:Input }, List { #[command(flatten)] input:Input }, Search { #[command(flatten)] input:Input, #[arg(required=true)] pattern:Vec<String> }, Explain { #[command(flatten)] input:Input, name:String } }
 #[derive(Args,Clone)] struct Input { #[arg(long,value_enum)] shell:Shell, #[arg(long,default_value="auto",value_enum)] platform:PlatformArg, #[arg(long,default_value="auto")] distro:DistroArg, #[arg(long,default_value="auto")] environment:EnvironmentArg, #[arg(long)] source:PathBuf, #[arg(long)] no_local:bool, #[arg(long,conflicts_with="no_shortcut_map")] shortcut_map:Option<PathBuf>, #[arg(long)] no_shortcut_map:bool }

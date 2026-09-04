@@ -40,6 +40,15 @@ fn first_available_same_named_candidate_is_case_insensitive() {
     assert!(candidates[0].bypass_shell_function);
 }
 #[test]
+fn local_binary_version_uses_the_package_version_fallback() {
+    let output=std::process::Command::new(env!("CARGO_BIN_EXE_aliasc"))
+        .arg("--version")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(),format!("aliasc {}",env!("CARGO_PKG_VERSION")));
+}
+#[test]
 fn resolver_expands_relative_duplicate_includes_and_local_override() {
     let d=tempdir().unwrap(); let root=d.path();
     fs::write(root.join("child"), "[Common]\nfrom_child=printf child\n").unwrap();
