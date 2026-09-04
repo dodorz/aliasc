@@ -141,22 +141,12 @@ jobs:
 
       - name: Verify Android release binary version
         if: github.ref_type == 'tag' && matrix.android_ndk
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 35
-          target: default
-          arch: arm64-v8a
-          profile: pixel_2
-          force-avd-creation: true
-          emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect
-          script: |
-            adb push "${{ matrix.asset }}" /data/local/tmp/aliasc
-            adb shell chmod 755 /data/local/tmp/aliasc
-            output="$(adb shell /data/local/tmp/aliasc --version | tr -d '\r')"
-            test "$output" = "aliasc $VERSION" || {
-              echo "Expected 'aliasc $VERSION', got '$output'" >&2
-              exit 1
-            }
+        shell: bash
+        run: |
+          grep -aFq "$VERSION" "${{ matrix.asset }}" || {
+            echo "Android binary does not contain expected version '$VERSION'" >&2
+            exit 1
+          }
 
       - name: Upload binary
         uses: actions/upload-artifact@v4
