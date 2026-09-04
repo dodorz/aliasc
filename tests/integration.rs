@@ -1,4 +1,4 @@
-use aliasc::{backend, compile_model, context::{Distro, Environment, Platform, Shell}, dsl::{parse_template, SourceSpan, Template}, manifest, CompileOptions, Context};
+use aliasc::{backend, compile_model, context::{Distro, Environment, Platform, Shell}, dsl::{parse_template, ArgumentSegment, SourceSpan, Template}, manifest, CompileOptions, Context};
 use std::{fs, path::PathBuf};
 use tempfile::tempdir;
 
@@ -48,6 +48,87 @@ fn local_binary_version_uses_the_package_version_fallback() {
     assert!(output.status.success());
     assert_eq!(String::from_utf8_lossy(&output.stdout).trim(),format!("aliasc {}",env!("CARGO_PKG_VERSION")));
 }
+#[test]
+fn same_named_command_substitution_is_bypassed_at_both_levels() {
+    let d=tempdir().unwrap(); let source=d.path().join("alias");
+    fs::write(&source,"[Common]\nfoo=foo \"$(foo --list)\"\n").unwrap();
+    let model=compile_model(&options(source,Platform::Linux)).unwrap(); let generated=backend::generate(&model.context,&model.definitions).unwrap();
+    assert!(generated.primary.contains("foo() {\n  command 'foo' \"$(command 'foo' '--list' \"$@\")\" \"$@\""));
+}
+
+#[test]
+fn recursive_same_named_commands_are_marked_in_commands_pipelines_and_redirections() {
+    let d=tempdir().unwrap(); let source=d.path().join("alias");
+    fs::write(&source,"[Common]\nfoo=foo --flag\nnested=nested \"$(nested --list)\"\ndeep=printf \"$(deep $(deep --list))\"\npiped=printf value | piped --tail\nredirect=cat < \"$(redirect --input)\" > \"$(redirect --output)\"\n").unwrap();
+    let model=compile_model(&options(source,Platform::Linux)).unwrap();
+    let foo=model.definitions.iter().find(|definition|definition.name=="foo").unwrap();
+    let Template::Command(command)=&foo.template else { panic!("expected command template") };
+    assert!(command.bypass_shell_function);
+    assert!(command.pipeline.commands[0].bypass_shell_function);
+
+    let nested=model.definitions.iter().find(|definition|definition.name=="nested").unwrap();
+    let Template::Command(command)=&nested.template else { panic!("expected command template") };
+    assert!(command.pipeline.commands[0].bypass_shell_function);
+    let ArgumentSegment::CommandSubstitution(inner)=&command.pipeline.commands[0].arguments[1].segments[0] else { panic!("expected command substitution") };
+    assert!(inner.pipeline.commands[0].bypass_shell_function);
+
+    let deep=model.definitions.iter().find(|definition|definition.name=="deep").unwrap();
+    let Template::Command(command)=&deep.template else { panic!("expected command template") };
+    let ArgumentSegment::CommandSubstitution(inner)=&command.pipeline.commands[0].arguments[1].segments[0] else { panic!("expected command substitution") };
+    assert!(inner.pipeline.commands[0].bypass_shell_function);
+    let ArgumentSegment::CommandSubstitution(nested_inner)=&inner.pipeline.commands[0].arguments[1].segments[0] else { panic!("expected nested command substitution") };
+    assert!(nested_inner.pipeline.commands[0].bypass_shell_function);
+
+    let piped=model.definitions.iter().find(|definition|definition.name=="piped").unwrap();
+    let Template::Command(command)=&piped.template else { panic!("expected command template") };
+    assert!(!command.pipeline.commands[0].bypass_shell_function);
+    assert!(command.pipeline.commands[1].bypass_shell_function);
+
+    let redirect=model.definitions.iter().find(|definition|definition.name=="redirect").unwrap();
+    let Template::Command(command)=&redirect.template else { panic!("expected command template") };
+    let ArgumentSegment::CommandSubstitution(input)=redirect_command_input(command) else { panic!("expected input substitution") };
+    assert!(input.pipeline.commands[0].bypass_shell_function);
+    let ArgumentSegment::CommandSubstitution(output)=redirect_command_output(command) else { panic!("expected output substitution") };
+    assert!(output.pipeline.commands[0].bypass_shell_function);
+}
+
+fn redirect_command_input(command:&aliasc::dsl::CommandTemplate)->&aliasc::dsl::ArgumentSegment {
+    &command.pipeline.commands[0].input.as_ref().unwrap().segments[0]
+}
+
+fn redirect_command_output(command:&aliasc::dsl::CommandTemplate)->&aliasc::dsl::ArgumentSegment {
+    &command.pipeline.commands[0].output.as_ref().unwrap().0.segments[0]
+}
+
+#[test]
+fn recursive_same_named_commands_render_external_calls() {
+    let d=tempdir().unwrap(); let source=d.path().join("alias");
+    fs::write(&source,"[Common]\nfoo=foo --flag\nnested=nested \"$(nested --list)\"\npiped=printf value | piped --tail\n").unwrap();
+    let model=compile_model(&options(source,Platform::Linux)).unwrap(); let generated=backend::generate(&model.context,&model.definitions).unwrap();
+    assert!(generated.primary.contains("foo() {\n  command 'foo' '--flag' \"$@\""));
+    assert!(generated.primary.contains("nested() {\n  command 'nested' \"$(command 'nested' '--list' \"$@\")\" \"$@\""));
+    assert!(generated.primary.contains("'printf' 'value' | command 'piped' '--tail' \"$@\""));
+}
+
+#[cfg(unix)]
+#[test]
+fn zsh_executes_nested_same_named_commands_without_recursion() {
+    use std::{os::unix::fs::PermissionsExt, process::Command};
+    let d=tempdir().unwrap(); let root=d.path(); let source=root.join("alias"); let output=root.join("aliases.zsh");
+    fs::write(root.join("aichat"),"#!/bin/sh\nif [ \"$1\" = \"--list-models\" ]; then printf 'model\\n'; else printf 'outer %s\\n' \"$*\"; fi\n").unwrap();
+    fs::write(root.join("fzf"),"#!/bin/sh\ncat\n").unwrap();
+    fs::set_permissions(root.join("aichat"),fs::Permissions::from_mode(0o755)).unwrap();
+    fs::set_permissions(root.join("fzf"),fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(&source,"[Common]\naichat=aichat -m \"$(aichat --list-models | fzf)\"\n").unwrap();
+    let mut context=options(source,Platform::Linux); context.context.shell=Shell::Zsh;
+    let model=compile_model(&context).unwrap(); let generated=backend::generate(&model.context,&model.definitions).unwrap(); fs::write(&output,&generated.primary).unwrap();
+    let path=std::env::var("PATH").unwrap_or_default();
+    let result=Command::new("zsh").arg("-f").arg("-c").arg("source \"$1\"; aichat").arg("zsh").arg(&output).env("PATH",format!("{}:{}",root.display(),path)).output().unwrap();
+    assert!(result.status.success(),"{}",String::from_utf8_lossy(&result.stderr));
+    assert_eq!(String::from_utf8_lossy(&result.stdout),"outer -m model\\n");
+    assert!(!String::from_utf8_lossy(&result.stderr).contains("maximum nested function level reached"));
+}
+
 #[test]
 fn resolver_expands_relative_duplicate_includes_and_local_override() {
     let d=tempdir().unwrap(); let root=d.path();
@@ -142,6 +223,7 @@ fn unix_backend_bypasses_same_named_first_available_command_only() {
     assert!(generated.primary.contains("if __aliasc_is_external 'ls'; then __aliasc_first_ls=0"));
     assert!(generated.primary.contains("0) command 'ls' \"$@\""));
     assert!(generated.primary.contains("dir() {\n  command 'dir' '--color=auto' \"$@\""));
+    assert!(!generated.primary.contains("dir() {\n  'dir' '--color=auto' \"$@\""));
 }
 #[test]
 fn ordinary_aliases_and_first_available_candidates_keep_normal_rendering() {
