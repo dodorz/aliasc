@@ -14,19 +14,24 @@ fn definition_names_are_case_insensitive_and_last_definition_wins() {
     assert_eq!(model.definitions[0].name,"piweb");
     let generated=backend::generate(&model.context,&model.definitions).unwrap();
     assert!(generated.primary.contains("piweb() {"));
-    assert!(generated.primary.contains("Piweb() {"));
-    assert!(generated.primary.contains("PIWEB() {"));
+    assert!(!generated.primary.contains("Piweb() {"));
+    assert!(!generated.primary.contains("PIWEB() {"));
     assert!(generated.primary.contains("'second'"));
 }
 
 #[cfg(unix)]
 #[test]
-fn posix_alias_name_variants_execute_the_same_definition() {
+fn posix_alias_name_and_lowercase_variant_execute_the_same_definition() {
     use std::process::Command;
     let d=tempdir().unwrap(); let root=d.path(); let source=root.join("alias"); let output=root.join("aliases.sh");
     fs::write(&source,"[Common]\nPiWeb=printf '%s\\n' ok\n").unwrap();
-    let model=compile_model(&options(source,Platform::Linux)).unwrap(); let generated=backend::generate(&model.context,&model.definitions).unwrap(); fs::write(&output,&generated.primary).unwrap();
-    let result=Command::new("bash").arg("-c").arg(". \"$1\"; piweb; PIWEB").arg("bash").arg(&output).output().unwrap();
+    let model=compile_model(&options(source,Platform::Linux)).unwrap(); let generated=backend::generate(&model.context,&model.definitions).unwrap();
+    assert!(generated.primary.contains("PiWeb() {"));
+    assert!(generated.primary.contains("piweb() {"));
+    assert!(!generated.primary.contains("Piweb() {"));
+    assert!(!generated.primary.contains("PIWEB() {"));
+    fs::write(&output,&generated.primary).unwrap();
+    let result=Command::new("bash").arg("-c").arg(". \"$1\"; PiWeb; piweb").arg("bash").arg(&output).output().unwrap();
     assert!(result.status.success(),"{}",String::from_utf8_lossy(&result.stderr));
     assert_eq!(String::from_utf8_lossy(&result.stdout),"ok\nok\n");
 }
