@@ -15,7 +15,7 @@ impl fmt::Display for Diagnostic { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> 
 #[derive(Clone, Debug)]
 pub struct RawDefinition { pub name: String, pub body: String, pub section: Option<String>, pub span: SourceSpan, pub include_stack: Vec<PathBuf>, pub local: bool }
 #[derive(Clone, Debug)]
-pub struct Definition { pub name: String, pub template: Template, pub span: SourceSpan, pub legacy: bool, pub context: Context }
+pub struct Definition { pub name: String, pub template: Template, pub span: SourceSpan, pub legacy: bool, pub context: Context, pub section: Option<String>, pub body: String }
 #[derive(Clone, Debug)]
 pub enum Template { Command(CommandTemplate), SetEnv(Vec<(String, String)>), UnsetEnv(Vec<String>), WithEnv { vars: Vec<(String,String)>, body: Option<Box<CommandTemplate>> }, FirstAvailable(Vec<CommandTemplate>), LegacyCmdTemplate(String) }
 #[derive(Clone, Debug)]
