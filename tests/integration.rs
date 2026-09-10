@@ -172,6 +172,33 @@ fn portable_parser_rejects_unsafe_syntax_and_bad_all_arguments() {
 }
 
 #[test]
+fn scoped_package_versions_are_not_split_at_at_signs() {
+    let span=SourceSpan{file:PathBuf::from("fixture"),line:1,column:1};
+    let parsed=parse_template("pnpm dlx @openai/codex@latest --flag", &span, &[]).unwrap();
+    let Template::Command(command)=parsed else { panic!("expected command template") };
+    let arguments=&command.pipeline.commands[0].arguments;
+    assert_eq!(arguments.len(),4);
+    assert!(matches!(&arguments[2].segments[..],[ArgumentSegment::Literal(value)] if value=="@openai/codex@latest"));
+
+    let d=tempdir().unwrap(); let source=d.path().join("alias");
+    fs::write(&source,"[Common]\nCodex=FirstAvailable(codex, pnpm dlx @openai/codex@latest --flag)\n").unwrap();
+    let mut o=options(source,Platform::Windows); o.context.shell=Shell::Cmd;
+    let model=compile_model(&o).unwrap(); let generated=backend::generate(&model.context,&model.definitions).unwrap();
+    let runtime=&generated.sibling.unwrap().1;
+    assert!(runtime.contains("\"@openai/codex@latest\""));
+    assert!(!runtime.contains("\"@openai/codex\"\"@latest\""));
+}
+
+#[test]
+fn double_quoted_windows_paths_keep_backslashes() {
+    let span=SourceSpan{file:PathBuf::from("fixture"),line:1,column:1};
+    let parsed=parse_template("edt \"%USERPROFILE%\\Tools\\Script\\manisync.cfg\"", &span, &[]).unwrap();
+    let Template::Command(command)=parsed else { panic!("expected command template") };
+    let arguments=&command.pipeline.commands[0].arguments;
+    assert!(matches!(&arguments[1].segments[..],[ArgumentSegment::Literal(value)] if value=="%USERPROFILE%\\Tools\\Script\\manisync.cfg"));
+}
+
+#[test]
 fn missing_include_is_warning_and_cycle_is_error() {
     let d=tempdir().unwrap(); let source=d.path().join("alias");
     fs::write(&source,"include \"missing\"\n[Common]\nok=printf ok\n").unwrap();
@@ -277,7 +304,7 @@ fn first_available_keeps_selection_cached_and_falls_back_when_same_named_command
     let d=tempdir().unwrap(); let source=d.path().join("alias");
     fs::write(&source,"[Common]\nfoo=FirstAvailable(foo, bar)\n").unwrap();
     let model=compile_model(&options(source,Platform::Linux)).unwrap(); let generated=backend::generate(&model.context,&model.definitions).unwrap();
-    assert!(generated.primary.contains("if [ \"${__aliasc_first_foo+x}\" != x ]; then"));
+    assert!(generated.primary.contains("if [ \"${__aliasc_first_foo+x}\" != x ] || [ \"${__aliasc_first_foo-}\" = none ]; then"));
     assert!(generated.primary.contains("elif __aliasc_is_external 'bar'; then __aliasc_first_foo=1"));
     assert!(generated.primary.contains("0) command 'foo' \"$@\""));
     assert!(generated.primary.contains("1) 'bar' \"$@\""));
