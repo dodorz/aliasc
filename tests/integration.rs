@@ -345,6 +345,29 @@ fn posix_ordinary_same_named_command_does_not_recurse() {
 }
 
 #[test]
+fn cmd_outputs_use_crlf_line_endings() {
+    let d=tempdir().unwrap(); let source=d.path().join("alias");
+    fs::write(&source,"[Common]\nls=FirstAvailable(lsd, ls)\n").unwrap();
+    let mut o=options(source.clone(),Platform::Windows); o.context.shell=Shell::Cmd;
+    let output=d.path().join("alias.doskey");
+    let model=compile_model(&o).unwrap(); let generated=backend::generate(&model.context,&model.definitions).unwrap();
+    manifest::write_outputs(&output,&model,generated).unwrap();
+    let runtime=fs::read(d.path().join("aliasc-runtime.cmd")).unwrap();
+    assert!(runtime.windows(2).any(|w|w==b"\r\n"));
+    assert!(!runtime.iter().enumerate().any(|(i,&b)|b==b'\n'&&(i==0||runtime[i-1]!=b'\r')));
+    let primary=fs::read(&output).unwrap();
+    assert!(!primary.iter().enumerate().any(|(i,&b)|b==b'\n'&&(i==0||primary[i-1]!=b'\r')));
+
+    let mut p=options(source,Platform::Linux); p.context.shell=Shell::Posix;
+    let pout=d.path().join("aliases.sh");
+    let pmodel=compile_model(&p).unwrap(); let pgenerated=backend::generate(&pmodel.context,&pmodel.definitions).unwrap();
+    manifest::write_outputs(&pout,&pmodel,pgenerated).unwrap();
+    let ptext=fs::read(&pout).unwrap();
+    assert!(ptext.contains(&b'\n'));
+    assert!(!ptext.windows(2).any(|w|w==b"\r\n"));
+}
+
+#[test]
 fn manifest_tracks_missing_optional_inputs_and_all_outputs() {
     let d=tempdir().unwrap(); let source=d.path().join("alias"); let output=d.path().join("aliases.mac");
     fs::write(&source,"[Common]\nx=printf x\n").unwrap();
