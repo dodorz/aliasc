@@ -102,7 +102,7 @@ fn redirect_command_input(command:&aliasc::dsl::CommandTemplate)->&aliasc::dsl::
 }
 
 fn redirect_command_output(command:&aliasc::dsl::CommandTemplate)->&aliasc::dsl::ArgumentSegment {
-    &command.pipeline.commands[0].output.as_ref().unwrap().0.segments[0]
+    &command.pipeline.commands[0].output[0].0.segments[0]
 }
 
 #[test]
