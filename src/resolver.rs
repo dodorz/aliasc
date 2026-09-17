@@ -17,7 +17,7 @@ pub fn resolve(options:&CompileOptions)->Result<Compilation,Vec<Diagnostic>> {
     for raw in st.raw {
         let active=raw.local || raw.section.as_ref().is_some_and(|s|st.options.context.section_active(s)); if !active {continue}
         let mut legacy=raw.section.as_ref().is_some_and(|x|x.eq_ignore_ascii_case("windows"));
-        let result=if legacy && !(raw.body.trim_start().starts_with("SetEnv(") || raw.body.trim_start().starts_with("UnsetEnv(")) { Ok(Template::LegacyCmdTemplate(raw.body.clone())) } else { legacy=false; dsl::parse_template(&raw.body,&raw.span,&raw.include_stack) };
+        let result=if legacy && !(raw.body.trim_start().starts_with("SetEnv(") || raw.body.trim_start().starts_with("UnsetEnv(") || raw.body.trim_start().starts_with("WithEnv(")) { Ok(Template::LegacyCmdTemplate(raw.body.clone())) } else { legacy=false; dsl::parse_template(&raw.body,&raw.span,&raw.include_stack) };
         match result { Ok(mut template)=>{annotate_template(&mut template,&raw.name);let d=Definition{name:raw.name,template,span:raw.span,legacy,context:st.options.context.clone(),section:raw.section,body:raw.body};let key=d.name.to_ascii_lowercase();if let Some(i)=positions.get(&key).copied(){resolved[i]=d}else{positions.insert(key,resolved.len());resolved.push(d)}}, Err(e)=>st.diagnostics.push(e) }
     }
 fn annotate_template(template:&mut Template,name:&str){match template{Template::Command(command)=>annotate_command(command,name),Template::WithEnv{body:Some(command),..}=>annotate_command(command,name),Template::FirstAvailable(candidates)=>{for candidate in candidates{annotate_command(candidate,name);}},_=>{}}}

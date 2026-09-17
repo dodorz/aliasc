@@ -427,6 +427,22 @@ fn question_mark_shorthand_is_first_available_and_literal_questions_survive() {
 }
 
 #[test]
+fn windows_section_withenv_is_portable_and_cmd_runtime_sets_variables() {
+    let d=tempdir().unwrap(); let source=d.path().join("alias");
+    fs::write(&source,"[Windows]\nlangcli=WithEnv(\nCLAUDE_CODE_GIT_BASH_PATH=C:\\bash.exe\nCLAUDE_CODE_USE_POWERSHELL_TOOL=1\n) pnpm dlx langcli-com\nforward=WithEnv(\nA=1\n)\n").unwrap();
+    let mut o=options(source,Platform::Windows); o.context.shell=Shell::Cmd;
+    let model=compile_model(&o).unwrap();
+    let langcli=model.definitions.iter().find(|d|d.name=="langcli").unwrap();
+    assert!(!langcli.legacy);
+    let forward=model.definitions.iter().find(|d|d.name=="forward").unwrap();
+    assert!(!forward.legacy);
+    let generated=backend::generate(&model.context,&model.definitions).unwrap();
+    let runtime=&generated.sibling.unwrap().1;
+    assert!(runtime.contains("setlocal\nset \"CLAUDE_CODE_GIT_BASH_PATH=C:\\bash.exe\"\nset \"CLAUDE_CODE_USE_POWERSHELL_TOOL=1\"\ncall \"pnpm\" \"dlx\" \"langcli-com\" %1 %2 %3 %4 %5 %6 %7 %8 %9\nendlocal"));
+    assert!(runtime.contains("setlocal\nset \"A=1\"\n%1 %2 %3 %4 %5 %6 %7 %8 %9\nendlocal"));
+}
+
+#[test]
 fn multiline_definitions_allow_comments_blank_lines_and_mixed_separators() {
     let d=tempdir().unwrap(); let source=d.path().join("alias");
     fs::write(&source,"[Common]\ncat=FirstAvailable(\n# prefer batcat\nbatcat\n\nbat, ccat\n)\nls=FirstAvailable(\nlsd\nls --color=auto\n)\n").unwrap();
