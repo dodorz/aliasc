@@ -409,6 +409,24 @@ fn output_redirections_render_fd_and_stream_duplication() {
 }
 
 #[test]
+fn question_mark_shorthand_is_first_available_and_literal_questions_survive() {
+    let span=SourceSpan{file:PathBuf::from("fixture"),line:1,column:1};
+    let short=parse_template("?(bat, cat)", &span, &[]).unwrap();
+    let full=parse_template("FirstAvailable(bat, cat)", &span, &[]).unwrap();
+    assert_eq!(format!("{short:?}"),format!("{full:?}"));
+    let literal=parse_template("echo ?", &span, &[]).unwrap();
+    let Template::Command(command)=literal else { panic!("expected command template") };
+    assert!(matches!(&command.pipeline.commands[0].arguments[1].segments[..],[ArgumentSegment::Literal(value)] if value=="?"));
+
+    let d=tempdir().unwrap(); let source=d.path().join("alias");
+    fs::write(&source,"[Common]\ncat=?(batcat\nbat, ccat\n)\n").unwrap();
+    let model=compile_model(&options(source,Platform::Linux)).unwrap();
+    let definition=model.definitions.iter().find(|d|d.name=="cat").unwrap();
+    let Template::FirstAvailable(candidates)=&definition.template else { panic!("expected FirstAvailable") };
+    assert_eq!(candidates.iter().map(first_argument_literal).collect::<Vec<_>>(),vec!["batcat","bat","ccat"]);
+}
+
+#[test]
 fn multiline_definitions_allow_comments_blank_lines_and_mixed_separators() {
     let d=tempdir().unwrap(); let source=d.path().join("alias");
     fs::write(&source,"[Common]\ncat=FirstAvailable(\n# prefer batcat\nbatcat\n\nbat, ccat\n)\nls=FirstAvailable(\nlsd\nls --color=auto\n)\n").unwrap();

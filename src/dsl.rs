@@ -39,6 +39,8 @@ pub fn parse_template(body: &str, span: &SourceSpan, stack: &[PathBuf]) -> Resul
     if let Some(content) = wrapped(b, "SetEnv") { return parse_assignments(content, span, stack).map(Template::SetEnv); }
     if let Some(content) = wrapped(b, "UnsetEnv") { return parse_names(content, span, stack).map(Template::UnsetEnv); }
     if let Some(rest) = b.strip_prefix("WithEnv(") { let end = matching_paren(rest).ok_or_else(|| err(span, "unclosed WithEnv(...)" ,stack))?; let vars = parse_assignments(&rest[..end], span, stack)?; let tail = rest[end+1..].trim(); let body = if tail.is_empty() { None } else { Some(Box::new(parse_command(tail, span, stack)?)) }; return Ok(Template::WithEnv { vars, body }); }
+    let expanded: String;
+    let b = match b.strip_prefix("?(") { Some(rest) => { expanded = format!("FirstAvailable({rest}"); expanded.as_str() } None => b };
     if let Some(content) = wrapped(b, "FirstAvailable") { let mut candidates = Vec::new(); for p in split_top(content, ',') { let multiline = p.contains('\n'); for piece in split_top(p, '\n') { let piece = piece.trim(); if piece.is_empty() { if multiline { continue; } return Err(err(span, "FirstAvailable has an empty candidate", stack)); } candidates.push(parse_command(piece, span, stack)?); } } if candidates.is_empty() { return Err(err(span, "FirstAvailable needs a candidate", stack)); } return Ok(Template::FirstAvailable(candidates)); }
     Ok(Template::Command(parse_command(b, span, stack)?))
 }

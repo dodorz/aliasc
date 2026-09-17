@@ -75,6 +75,7 @@ posix, bash, zsh, fish, nu, powershell, pwsh, cmd
   ```
 
   `SetEnv(...)`, `UnsetEnv(...)`, and `WithEnv(...)` entries may be listed the same way, and comma and newline separators can be mixed. Inside a multi-line definition, blank lines and lines starting with `#` or `;` are ignored. A definition that reaches the end of the file with an unclosed `(` is an error.
+- `?(...)` is a shorthand for `FirstAvailable(...)`: `cat=?(batcat, bat, cat)` is equivalent to `cat=FirstAvailable(batcat, bat, cat)`. A `?` anywhere other than immediately before the opening parenthesis at the start of a definition body is a literal character.
 - `[Windows]` is the v1 legacy cmd-template compatibility section. Shell-specific sections are reserved and inactive in v1.
 
 Every successful compilation writes a manifest containing the resolved target context, tracked inputs, generated outputs, and content hashes.
