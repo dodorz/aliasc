@@ -37,7 +37,7 @@ pub fn render(compilation: &Compilation) -> Result<backend::Generated, Vec<Diagn
     backend::generate(&compilation.context, &compilation.definitions)
 }
 
-pub fn default_shortcut_map(source: &Path) -> PathBuf {
+pub fn default_shortcut_map() -> PathBuf {
     let home = dirs::home_dir().unwrap_or_else(|| Path::new(".").to_path_buf());
     home.join(".config").join("ShortcutMap.yaml")
 }

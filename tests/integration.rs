@@ -371,11 +371,88 @@ fn cmd_outputs_use_crlf_line_endings() {
 fn manifest_tracks_missing_optional_inputs_and_all_outputs() {
     let d=tempdir().unwrap(); let source=d.path().join("alias"); let output=d.path().join("aliases.mac");
     fs::write(&source,"[Common]\nx=printf x\n").unwrap();
-    let mut o=options(source,Platform::Windows);o.context.shell=Shell::Cmd;
+    let mut o=options(source,Platform::Windows);o.context.shell=Shell::Cmd;o.shortcut_map=Some(d.path().join("ShortcutMap.yaml"));
     let model=compile_model(&o).unwrap(); let generated=backend::generate(&model.context,&model.definitions).unwrap();
     manifest::write_outputs(&output,&model,generated).unwrap();
     let text=fs::read_to_string(format!("{}.manifest.json",output.display())).unwrap();
     assert!(text.contains("ShortcutMap.yaml"));
     assert!(text.contains("aliasc-runtime.cmd"));
     assert!(output.exists());
+}
+
+fn first_argument_literal(command:&aliasc::dsl::CommandTemplate)->String{match &command.pipeline.commands[0].arguments[0].segments[..]{[ArgumentSegment::Literal(value)]=>value.clone(),_=>panic!("expected literal first argument")}}
+
+#[test]
+fn multiline_first_available_matches_single_line_form() {
+    let d=tempdir().unwrap(); let source=d.path().join("alias");
+    fs::write(&source,"[Common]\ncat=FirstAvailable(\n  batcat\n  bat\n  ccat\n  cat\n)\n").unwrap();
+    let model=compile_model(&options(source.clone(),Platform::Linux)).unwrap();
+    let definition=model.definitions.iter().find(|d|d.name=="cat").unwrap();
+    let Template::FirstAvailable(candidates)=&definition.template else { panic!("expected FirstAvailable") };
+    assert_eq!(candidates.iter().map(first_argument_literal).collect::<Vec<_>>(),vec!["batcat","bat","ccat","cat"]);
+    let multiline=backend::generate(&model.context,&model.definitions).unwrap().primary;
+    assert!(multiline.contains("definition: FirstAvailable( batcat bat ccat cat )"));
+    fs::write(&source,"[Common]\ncat=FirstAvailable(batcat, bat, ccat, cat)\n").unwrap();
+    let single=compile_model(&options(source,Platform::Linux)).unwrap();
+    let single_definition=single.definitions.iter().find(|d|d.name=="cat").unwrap();
+    assert_eq!(format!("{:?}",definition.template),format!("{:?}",single_definition.template));
+}
+
+#[test]
+fn output_redirections_render_fd_and_stream_duplication() {
+    let d=tempdir().unwrap(); let source=d.path().join("alias");
+    fs::write(&source,"[Common]\nboth=build > out.log 2>&1\nerr=build 2>> err.log\n").unwrap();
+    let model=compile_model(&options(source,Platform::Linux)).unwrap();
+    let generated=backend::generate(&model.context,&model.definitions).unwrap();
+    assert!(generated.primary.contains("> 'out.log' 2>&1"));
+    assert!(generated.primary.contains("2>> 'err.log'"));
+}
+
+#[test]
+fn multiline_definitions_allow_comments_blank_lines_and_mixed_separators() {
+    let d=tempdir().unwrap(); let source=d.path().join("alias");
+    fs::write(&source,"[Common]\ncat=FirstAvailable(\n# prefer batcat\nbatcat\n\nbat, ccat\n)\nls=FirstAvailable(\nlsd\nls --color=auto\n)\n").unwrap();
+    let model=compile_model(&options(source,Platform::Linux)).unwrap();
+    let cat=model.definitions.iter().find(|d|d.name=="cat").unwrap();
+    let Template::FirstAvailable(candidates)=&cat.template else { panic!("expected FirstAvailable") };
+    assert_eq!(candidates.iter().map(first_argument_literal).collect::<Vec<_>>(),vec!["batcat","bat","ccat"]);
+    let ls=model.definitions.iter().find(|d|d.name=="ls").unwrap();
+    let Template::FirstAvailable(candidates)=&ls.template else { panic!("expected FirstAvailable") };
+    assert_eq!(candidates.iter().map(first_argument_literal).collect::<Vec<_>>(),vec!["lsd","ls"]);
+}
+
+#[test]
+fn multiline_setenv_unsetenv_and_withenv_parse() {
+    let d=tempdir().unwrap(); let source=d.path().join("alias");
+    fs::write(&source,"[Common]\nenv=SetEnv(\n  HELLO=\"one two\"\n  WORLD=temporary\n)\nclean=UnsetEnv(\n  HELLO\n  WORLD\n)\nrun=WithEnv(\n  HELLO=temporary\n) printf ${HELLO}\n").unwrap();
+    let model=compile_model(&options(source,Platform::Linux)).unwrap();
+    let env=model.definitions.iter().find(|d|d.name=="env").unwrap();
+    let Template::SetEnv(vars)=&env.template else { panic!("expected SetEnv") };
+    assert_eq!(vars,&vec![("HELLO".to_string(),"one two".to_string()),("WORLD".to_string(),"temporary".to_string())]);
+    let clean=model.definitions.iter().find(|d|d.name=="clean").unwrap();
+    let Template::UnsetEnv(names)=&clean.template else { panic!("expected UnsetEnv") };
+    assert_eq!(names,&vec!["HELLO".to_string(),"WORLD".to_string()]);
+    let run=model.definitions.iter().find(|d|d.name=="run").unwrap();
+    let Template::WithEnv{vars,body}=&run.template else { panic!("expected WithEnv") };
+    assert_eq!(vars,&vec![("HELLO".to_string(),"temporary".to_string())]);
+    assert!(body.is_some());
+}
+
+#[test]
+fn unclosed_multiline_definition_is_an_error() {
+    let d=tempdir().unwrap(); let source=d.path().join("alias");
+    fs::write(&source,"[Common]\ncat=FirstAvailable(\nbat\n").unwrap();
+    let Err(diags)=compile_model(&options(source,Platform::Linux)) else { panic!("expected error") };
+    assert!(diags.iter().any(|x|x.message.contains("unclosed `(`")));
+}
+
+#[test]
+fn cmd_alias_search_renders_multiline_definition_on_one_line() {
+    let d=tempdir().unwrap(); let source=d.path().join("alias");
+    fs::write(&source,"[Common]\ncat=FirstAvailable(\n  batcat\n  bat\n)\n").unwrap();
+    let mut o=options(source,Platform::Windows); o.context.shell=Shell::Cmd;
+    let model=compile_model(&o).unwrap(); let generated=backend::generate(&model.context,&model.definitions).unwrap();
+    let runtime=&generated.sibling.unwrap().1;
+    assert!(runtime.contains("echo definition: FirstAvailable( batcat bat )"));
+    assert!(!runtime.contains("definition: FirstAvailable(\n"));
 }

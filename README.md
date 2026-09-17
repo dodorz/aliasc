@@ -64,6 +64,17 @@ posix, bash, zsh, fish, nu, powershell, pwsh, cmd
 - `ShortcutMap.yaml` beside the source is read by default unless `--no-shortcut-map` is supplied.
 - Section activation depends on platform, distro, and environment, not on `--shell`.
 - Alias definition names are case-insensitive when definitions are resolved, but generated entry points are intentionally limited for compactness. A definition such as `PiWeb=...` can be invoked as `PiWeb` or `piweb`; mixed-case variants such as `Piweb` are not generated on case-sensitive shells.
+- Definitions may span multiple lines while parentheses are unbalanced. This is mostly useful for listing one `FirstAvailable` candidate per line:
+
+  ```text
+  cat=FirstAvailable(
+    batcat
+    bat
+    cat
+  )
+  ```
+
+  `SetEnv(...)`, `UnsetEnv(...)`, and `WithEnv(...)` entries may be listed the same way, and comma and newline separators can be mixed. Inside a multi-line definition, blank lines and lines starting with `#` or `;` are ignored. A definition that reaches the end of the file with an unclosed `(` is an error.
 - `[Windows]` is the v1 legacy cmd-template compatibility section. Shell-specific sections are reserved and inactive in v1.
 
 Every successful compilation writes a manifest containing the resolved target context, tracked inputs, generated outputs, and content hashes.
