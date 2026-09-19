@@ -112,12 +112,10 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y musl-tools
 
       - name: Build release binary
-        if: "!matrix.musl"
         run: cargo build --locked --release --target ${{ matrix.target }}
-
-      - name: Build release binary (musl)
-        if: matrix.musl
-        run: cargo rustc --locked --release --target ${{ matrix.target }} -- -C target-feature=+crt-static
+        env:
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C target-feature=+crt-static -C link-arg=-static"
 
       - name: Verify Android ARM64 binary
         if: matrix.android_ndk
@@ -129,7 +127,8 @@ jobs:
         if: matrix.musl
         shell: bash
         run: |
-          file "target/${{ matrix.target }}/release/aliasc" | grep -q 'statically linked'
+          file "target/${{ matrix.target }}/release/aliasc"
+          ! readelf -l "target/${{ matrix.target }}/release/aliasc" | grep -q 'interpreter'
 
       - name: Package Windows binary
         if: runner.os == 'Windows'
