@@ -113,6 +113,8 @@ jobs:
 
       - name: Build release binary
         run: cargo build --locked --release --target ${{ matrix.target }}
+        env:
+          RUSTFLAGS: ${{ matrix.musl && '-C target-feature=+crt-static' || '' }}
 
       - name: Verify Android ARM64 binary
         if: matrix.android_ndk
