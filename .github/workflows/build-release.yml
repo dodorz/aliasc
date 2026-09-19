@@ -112,9 +112,12 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y musl-tools
 
       - name: Build release binary
+        if: "!matrix.musl"
         run: cargo build --locked --release --target ${{ matrix.target }}
-        env:
-          RUSTFLAGS: ${{ matrix.musl && '-C target-feature=+crt-static' || '' }}
+
+      - name: Build release binary (musl)
+        if: matrix.musl
+        run: cargo rustc --locked --release --target ${{ matrix.target }} -- -C target-feature=+crt-static
 
       - name: Verify Android ARM64 binary
         if: matrix.android_ndk
