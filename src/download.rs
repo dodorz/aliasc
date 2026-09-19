@@ -9,6 +9,9 @@ use std::{
 
 const RELEASES_URL: &str = "https://api.github.com/repos/dodorz/aliasc/releases/latest";
 
+const MIN_GLIBC_MAJOR: u64 = 2;
+const MIN_GLIBC_MINOR: u64 = 31;
+
 #[derive(Debug, Deserialize)]
 struct Release {
     tag_name: String,
@@ -97,17 +100,45 @@ fn fetch_asset(url: &str) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
+fn prefer_musl() -> bool {
+    match glibc_version() {
+        Some((major, minor)) => major < MIN_GLIBC_MAJOR || (major == MIN_GLIBC_MAJOR && minor < MIN_GLIBC_MINOR),
+        None => false,
+    }
+}
+
+fn glibc_version() -> Option<(u64, u64)> {
+    let output = Command::new("ldd")
+        .arg("--version")
+        .output()
+        .ok()?;
+    let combined = {
+        let mut s = String::from_utf8_lossy(&output.stdout).into_owned();
+        s.push_str(&String::from_utf8_lossy(&output.stderr));
+        s
+    };
+    let line = combined.lines().find(|line| line.contains("GLIBC"))?;
+    let after_glibc = line.rsplit_once("GLIBC ")?.1;
+    let version_str = after_glibc.split_whitespace().next()?;
+    let mut parts = version_str.splitn(2, '.');
+    let major = parts.next()?.parse::<u64>().ok()?;
+    let minor = parts.next()?.parse::<u64>().ok()?;
+    Some((major, minor))
+}
+
 fn asset_name() -> Result<String, String> {
     let os = env::consts::OS;
     let arch = env::consts::ARCH;
-    let target = match (os, arch) {
-        ("windows", "x86_64") => "x86_64-pc-windows-msvc",
-        ("windows", "x86") => "i686-pc-windows-msvc",
-        ("windows", "aarch64") => "aarch64-pc-windows-msvc",
-        ("macos", "x86_64") => "x86_64-apple-darwin",
-        ("macos", "aarch64") => "aarch64-apple-darwin",
-        ("linux", "x86_64") => "x86_64-unknown-linux-gnu",
-        ("android", "aarch64") => "aarch64-linux-android",
+    let use_musl = os == "linux" && arch == "x86_64" && prefer_musl();
+    let target = match (os, arch, use_musl) {
+        ("windows", "x86_64", _) => "x86_64-pc-windows-msvc",
+        ("windows", "x86", _) => "i686-pc-windows-msvc",
+        ("windows", "aarch64", _) => "aarch64-pc-windows-msvc",
+        ("macos", "x86_64", _) => "x86_64-apple-darwin",
+        ("macos", "aarch64", _) => "aarch64-apple-darwin",
+        ("linux", "x86_64", true) => "x86_64-unknown-linux-musl",
+        ("linux", "x86_64", false) => "x86_64-unknown-linux-gnu",
+        ("android", "aarch64", _) => "aarch64-linux-android",
         _ => {
             return Err(format!(
                 "no published aliasc asset for this platform ({os}/{arch})"
@@ -274,6 +305,46 @@ mod tests {
     fn windows_asset_names_include_exe() {
         if env::consts::OS == "windows" {
             assert!(asset_name().unwrap().ends_with(".exe"));
+        }
+    }
+
+    #[test]
+    fn glibc_version_is_detected_on_linux() {
+        if cfg!(target_os = "linux") {
+            let version = glibc_version();
+            assert!(version.is_some(), "expected glibc version on Linux");
+            let (major, minor) = version.unwrap();
+            assert!(major >= 2, "glibc major version should be >= 2, got {major}");
+        }
+    }
+
+    #[test]
+    fn prefer_musl_returns_false_on_modern_glibc() {
+        if cfg!(target_os = "linux") {
+            let version = glibc_version();
+            if let Some((major, minor)) = version {
+                if major > MIN_GLIBC_MAJOR || (major == MIN_GLIBC_MAJOR && minor >= MIN_GLIBC_MINOR) {
+                    assert!(!prefer_musl(), "modern glibc should not prefer musl");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn musl_asset_name_is_used_when_preferred() {
+        if cfg!(target_os = "linux") && cfg!(target_arch = "x86_64") {
+            let name = asset_name().unwrap();
+            if prefer_musl() {
+                assert!(
+                    name.contains("musl"),
+                    "expected musl asset name, got {name}"
+                );
+            } else {
+                assert!(
+                    name.contains("gnu"),
+                    "expected gnu asset name, got {name}"
+                );
+            }
         }
     }
 }
