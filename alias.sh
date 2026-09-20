@@ -230,6 +230,7 @@ __aliasc_fallback_parse_file() {
                 __aliasc_fallback_section_active "$__aliasc_fallback_section" || continue
                 __aliasc_fallback_name=${__aliasc_fallback_line%%=*}
                 __aliasc_fallback_body=${__aliasc_fallback_line#*=}
+                __aliasc_fallback_body=$(printf '%s' "$__aliasc_fallback_body" | command sed 's/ #.*//')
                 [ -n "$__aliasc_fallback_name" ] || continue
                 __aliasc_fallback_define "$__aliasc_fallback_name" "$__aliasc_fallback_body"
                 ;;

@@ -456,6 +456,41 @@ fn multiline_definitions_allow_comments_blank_lines_and_mixed_separators() {
 }
 
 #[test]
+fn inline_comments_are_stripped_from_definitions() {
+    let d=tempdir().unwrap(); let source=d.path().join("alias");
+    fs::write(&source,"[Common]\necho=echo hello # this is a comment\nprintf=printf '%s\\n' ok # trailing comment\n").unwrap();
+    let model=compile_model(&options(source,Platform::Linux)).unwrap();
+    let echo=model.definitions.iter().find(|d|d.name=="echo").unwrap();
+    let Template::Command(cmd)=&echo.template else { panic!("expected command") };
+    assert_eq!(cmd.pipeline.commands[0].arguments.len(),2);
+    let generated=backend::generate(&model.context,&model.definitions).unwrap();
+    assert!(generated.primary.contains("'echo' 'hello'"));
+    assert!(!generated.primary.contains("comment"));
+}
+
+#[test]
+fn inline_comments_inside_quoted_strings_are_preserved() {
+    let d=tempdir().unwrap(); let source=d.path().join("alias");
+    fs::write(&source,"[Common]\necho=echo \"hello # world\" # real comment\n").unwrap();
+    let model=compile_model(&options(source,Platform::Linux)).unwrap();
+    let echo=model.definitions.iter().find(|d|d.name=="echo").unwrap();
+    let Template::Command(_cmd)=&echo.template else { panic!("expected command") };
+    let generated=backend::generate(&model.context,&model.definitions).unwrap();
+    assert!(generated.primary.contains("\"hello # world\""));
+    assert!(!generated.primary.contains("real comment"));
+}
+
+#[test]
+fn inline_comments_in_first_available_candidates() {
+    let d=tempdir().unwrap(); let source=d.path().join("alias");
+    fs::write(&source,"[Common]\ncat=FirstAvailable(bat # preferred, cat # fallback)\n").unwrap();
+    let model=compile_model(&options(source,Platform::Linux)).unwrap();
+    let cat=model.definitions.iter().find(|d|d.name=="cat").unwrap();
+    let Template::FirstAvailable(candidates)=&cat.template else { panic!("expected FirstAvailable") };
+    assert_eq!(candidates.iter().map(first_argument_literal).collect::<Vec<_>>(),vec!["bat","cat"]);
+}
+
+#[test]
 fn multiline_setenv_unsetenv_and_withenv_parse() {
     let d=tempdir().unwrap(); let source=d.path().join("alias");
     fs::write(&source,"[Common]\nenv=SetEnv(\n  HELLO=\"one two\"\n  WORLD=temporary\n)\nclean=UnsetEnv(\n  HELLO\n  WORLD\n)\nrun=WithEnv(\n  HELLO=temporary\n) printf ${HELLO}\n").unwrap();
