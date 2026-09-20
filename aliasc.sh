@@ -14,6 +14,17 @@ fail() {
     exit 1
 }
 
+__aliasc_have_glibc() {
+    major=$1
+    minor=$2
+    ldd_out=$(ldd --version 2>&1 | head -n1) || return 1
+    ver=$(printf '%s' "$ldd_out" | sed -n 's/.*GLIBC \([0-9]\+\)\.\([0-9]\+\).*/\1 \2/p')
+    [ -n "$ver" ] || return 1
+    cur_major=${ver%% *}
+    cur_minor=${ver#* }
+    [ "$cur_major" -gt "$major" ] || { [ "$cur_major" -eq "$major" ] && [ "$cur_minor" -ge "$minor" ]; }
+}
+
 os=$(uname -s 2>/dev/null || true)
 arch=$(uname -m 2>/dev/null || true)
 asset=
@@ -21,7 +32,13 @@ asset=
 case "$os" in
     Linux)
         case "$arch" in
-            x86_64|amd64) asset=aliasc-x86_64-unknown-linux-gnu ;;
+            x86_64|amd64)
+                if __aliasc_have_glibc 2 31; then
+                    asset=aliasc-x86_64-unknown-linux-gnu
+                else
+                    asset=aliasc-x86_64-unknown-linux-musl
+                fi
+                ;;
             aarch64|arm64)
                 if [ "${PREFIX-}" = "/data/data/com.termux/files/usr" ] || [ -n "${TERMUX_VERSION-}" ]; then
                     asset=aliasc-aarch64-linux-android
@@ -68,6 +85,32 @@ if [ ! -x "$binary" ]; then
     chmod 0755 "$tmp" || fail "cannot mark downloaded binary executable: $tmp"
     mv -f "$tmp" "$binary" || fail "cannot install downloaded binary: $binary"
     trap - EXIT HUP INT TERM
+
+    case "$asset" in
+        *-unknown-linux-gnu)
+            if ! "$binary" --version >/dev/null 2>&1; then
+                printf '%s\n' "aliasc: gnu binary failed to run; falling back to musl" >&2
+                rm -f "$binary"
+                asset=aliasc-x86_64-unknown-linux-musl
+                binary=$cache_root/$asset
+                if [ ! -x "$binary" ]; then
+                    tmp=$(mktemp "$cache_root/.${asset}.tmp.XXXXXX") || fail "cannot create download temporary file"
+                    trap 'rm -f "$tmp"' EXIT HUP INT TERM
+                    url="https://github.com/$repo/releases/$release/download/$asset"
+                    if command -v curl >/dev/null 2>&1; then
+                        curl --fail --location --silent --show-error --retry 2 --connect-timeout 10 --max-time 45 --output "$tmp" "$url" || fail "download failed: $url"
+                    elif command -v wget >/dev/null 2>&1; then
+                        wget -q --timeout=15 --tries=2 -O "$tmp" "$url" || fail "download failed: $url"
+                    else
+                        fail "curl or wget is required to download $asset"
+                    fi
+                    chmod 0755 "$tmp" || fail "cannot mark downloaded binary executable: $tmp"
+                    mv -f "$tmp" "$binary" || fail "cannot install downloaded binary: $binary"
+                    trap - EXIT HUP INT TERM
+                fi
+            fi
+            ;;
+    esac
 fi
 
 if [ $# -gt 0 ]; then
