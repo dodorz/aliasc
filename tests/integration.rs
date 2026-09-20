@@ -168,7 +168,8 @@ fn portable_parser_rejects_unsafe_syntax_and_bad_all_arguments() {
     assert!(parse_template("echo $HOME",&span,&[]).is_err());
     let parsed=parse_template("\\foo",&span,&[]).unwrap();
     let Template::Command(command)=parsed else { panic!("expected command template") };
-    assert!(matches!(&command.pipeline.commands[0].arguments[0].segments[..], [aliasc::dsl::ArgumentSegment::Literal(value)] if value=="\\foo"));
+    assert!(command.pipeline.commands[0].bypass_shell_function);
+    assert!(matches!(&command.pipeline.commands[0].arguments[0].segments[..], [aliasc::dsl::ArgumentSegment::Literal(value)] if value=="foo"));
 }
 
 #[test]
@@ -206,7 +207,8 @@ fn missing_include_is_warning_and_cycle_is_error() {
     assert!(result.diagnostics.iter().any(|x|x.message.contains("does not exist")));
     fs::write(&source,"include \"other\"\n[Common]\nok=printf ok\n").unwrap();
     fs::write(d.path().join("other"),"include \"alias\"\n").unwrap();
-    assert!(compile_model(&options(source,Platform::Linux)).is_err());
+    let result=compile_model(&options(source,Platform::Linux)).unwrap();
+    assert!(result.diagnostics.iter().any(|x|x.message.contains("include cycle detected")));
 }
 
 #[test]
@@ -511,8 +513,8 @@ fn multiline_setenv_unsetenv_and_withenv_parse() {
 fn unclosed_multiline_definition_is_an_error() {
     let d=tempdir().unwrap(); let source=d.path().join("alias");
     fs::write(&source,"[Common]\ncat=FirstAvailable(\nbat\n").unwrap();
-    let Err(diags)=compile_model(&options(source,Platform::Linux)) else { panic!("expected error") };
-    assert!(diags.iter().any(|x|x.message.contains("unclosed `(`")));
+    let result=compile_model(&options(source,Platform::Linux)).unwrap();
+    assert!(result.diagnostics.iter().any(|x|x.message.contains("unclosed `(`")));
 }
 
 #[test]
@@ -524,4 +526,69 @@ fn cmd_alias_search_renders_multiline_definition_on_one_line() {
     let runtime=&generated.sibling.unwrap().1;
     assert!(runtime.contains("echo definition: FirstAvailable( batcat bat )"));
     assert!(!runtime.contains("definition: FirstAvailable(\n"));
+}
+
+#[test]
+fn backslash_command_prefix_bypasses_shell_function() {
+    let d=tempdir().unwrap(); let source=d.path().join("alias");
+    fs::write(&source,"[Common]\nrun=\\cat /etc/hostname\n").unwrap();
+    let model=compile_model(&options(source,Platform::Linux)).unwrap();
+    let run=model.definitions.iter().find(|d|d.name=="run").unwrap();
+    let Template::Command(command)=&run.template else { panic!("expected command template") };
+    assert!(command.bypass_shell_function);
+    assert!(command.pipeline.commands[0].bypass_shell_function);
+    let generated=backend::generate(&model.context,&model.definitions).unwrap();
+    assert!(generated.primary.contains("command 'cat' '/etc/hostname' \"$@\""));
+}
+
+#[test]
+fn backslash_command_in_first_available_candidate() {
+    let d=tempdir().unwrap(); let source=d.path().join("alias");
+    fs::write(&source,"[Common]\nview=FirstAvailable(\\less, less)\n").unwrap();
+    let model=compile_model(&options(source,Platform::Linux)).unwrap();
+    let view=model.definitions.iter().find(|d|d.name=="view").unwrap();
+    let Template::FirstAvailable(candidates)=&view.template else { panic!("expected FirstAvailable") };
+    assert!(candidates[0].bypass_shell_function);
+    let generated=backend::generate(&model.context,&model.definitions).unwrap();
+    assert!(generated.primary.contains("command 'less' \"$@\""));
+}
+
+#[test]
+fn backslash_command_in_withenv() {
+    let d=tempdir().unwrap(); let source=d.path().join("alias");
+    fs::write(&source,"[Common]\nrun=WithEnv(MODE=prod) \\cat /etc/hostname\n").unwrap();
+    let model=compile_model(&options(source,Platform::Linux)).unwrap();
+    let generated=backend::generate(&model.context,&model.definitions).unwrap();
+    assert!(generated.primary.contains("command 'cat' '/etc/hostname'"));
+}
+
+#[test]
+fn error_in_one_definition_does_not_prevent_backslash_command() {
+    let d=tempdir().unwrap(); let source=d.path().join("alias");
+    fs::write(&source,"[Common]\nbad=echo $HOME\nok=\\cat /etc/hostname\n").unwrap();
+    let model=compile_model(&options(source,Platform::Linux)).unwrap();
+    assert!(model.diagnostics.iter().any(|x|x.severity==aliasc::Severity::Error));
+    let ok=model.definitions.iter().find(|d|d.name=="ok").unwrap();
+    let Template::Command(command)=&ok.template else { panic!("expected command template") };
+    assert!(command.bypass_shell_function);
+    let generated=backend::generate(&model.context,&model.definitions).unwrap();
+    assert!(generated.primary.contains("command 'cat' '/etc/hostname' \"$@\""));
+}
+
+#[test]
+fn backslash_command_renders_native_for_all_shells() {
+    let d=tempdir().unwrap(); let source=d.path().join("alias");
+    fs::write(&source,"[Common]\nrun=\\cat /etc/hostname\n").unwrap();
+    for (shell,platform) in [(Shell::Posix,Platform::Linux),(Shell::Bash,Platform::Linux),(Shell::Zsh,Platform::Linux),(Shell::Fish,Platform::Linux),(Shell::Nu,Platform::Linux),(Shell::Powershell,Platform::Windows),(Shell::Cmd,Platform::Windows)] {
+        let mut o=options(source.clone(),platform); o.context.shell=shell;
+        let model=compile_model(&o).unwrap(); let generated=backend::generate(&model.context,&model.definitions).unwrap();
+        let text=generated.sibling.map(|(_,body)|format!("{}\n{}",generated.primary,body)).unwrap_or(generated.primary);
+        match shell {
+            Shell::Posix|Shell::Bash|Shell::Zsh => assert!(text.contains("command 'cat' '/etc/hostname' \"$@\"")),
+            Shell::Fish => assert!(text.contains("command 'cat' '/etc/hostname' $argv")),
+            Shell::Nu => assert!(text.contains("^cat '/etc/hostname' ...$alias_args")),
+            Shell::Powershell|Shell::Pwsh => assert!(text.contains("Get-Command")),
+            Shell::Cmd => assert!(text.contains(":__aliasc_find_external")),
+        }
+    }
 }

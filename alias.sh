@@ -140,6 +140,9 @@ __aliasc_fallback_define() {
         __aliasc_fallback_env=${__aliasc_fallback_env#?}
         __aliasc_fallback_command=${__aliasc_fallback_payload#*)}
         __aliasc_fallback_command=$(printf '%s' "$__aliasc_fallback_command" | command sed 's/^[[:space:]]*//')
+        case "$__aliasc_fallback_command" in
+            \\*) __aliasc_fallback_command="command ${__aliasc_fallback_command#\\}" ;;
+        esac
         if [ -n "$__aliasc_fallback_command" ]; then
             eval "${__aliasc_fallback_name}() { ( export $__aliasc_fallback_env; $__aliasc_fallback_command \"\$@\" ); }"
         else
@@ -168,6 +171,7 @@ __aliasc_fallback_define() {
     esac
 
     case "$__aliasc_fallback_body" in
+        \\*) __aliasc_fallback_body="command ${__aliasc_fallback_body#\\}" ;;
         *';'*|*'|'*|*'&&'*|*'||'*) ;;
         command\ *|export\ *|unset\ *|return\ *|:* ) ;;
         *) __aliasc_fallback_body="command $__aliasc_fallback_body" ;;
