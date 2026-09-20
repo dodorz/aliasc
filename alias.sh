@@ -122,31 +122,6 @@ __aliasc_fallback_define() {
         return
     fi
 
-    __aliasc_fallback_paren=0
-    __aliasc_fallback_q=
-    __aliasc_fallback_s=$__aliasc_fallback_body
-    while [ -n "$__aliasc_fallback_s" ]; do
-        __aliasc_fallback_c=${__aliasc_fallback_s%"${__aliasc_fallback_s#?}"}
-        __aliasc_fallback_s=${__aliasc_fallback_s#?}
-        if [ "$__aliasc_fallback_q" = "'" ]; then
-            [ "$__aliasc_fallback_c" = "'" ] && __aliasc_fallback_q=
-        elif [ "$__aliasc_fallback_q" = '"' ]; then
-            [ "$__aliasc_fallback_c" = '"' ] && __aliasc_fallback_q=
-        elif [ "$__aliasc_fallback_c" = "'" ]; then
-            __aliasc_fallback_q=\'
-        elif [ "$__aliasc_fallback_c" = '"' ]; then
-            __aliasc_fallback_q=\"
-        elif [ "$__aliasc_fallback_c" = '(' ]; then
-            __aliasc_fallback_paren=$((__aliasc_fallback_paren + 1))
-        elif [ "$__aliasc_fallback_c" = ')' ]; then
-            [ "$__aliasc_fallback_paren" -gt 0 ] && __aliasc_fallback_paren=$((__aliasc_fallback_paren - 1))
-        fi
-    done
-    if [ "$__aliasc_fallback_paren" -gt 0 ]; then
-        __aliasc_fallback_define_error 'multiline definition (unclosed `(`) is not supported by the shell fallback'
-        return
-    fi
-
     if [ "${__aliasc_fallback_body#SetEnv}" != "$__aliasc_fallback_body" ]; then
         __aliasc_fallback_payload=${__aliasc_fallback_body#SetEnv}
         __aliasc_fallback_payload=${__aliasc_fallback_payload#?}
@@ -218,23 +193,51 @@ __aliasc_fallback_section_active() {
 __aliasc_fallback_parse_file() {
     [ -f "$1" ] || return 0
     __aliasc_fallback_section=
+    __aliasc_fallback_in_multiline=0
+    __aliasc_fallback_multiline_name=
+    __aliasc_fallback_multiline_body=
+    __aliasc_fallback_multiline_paren=0
     while IFS= read -r __aliasc_fallback_line || [ -n "$__aliasc_fallback_line" ]; do
         __aliasc_fallback_line=$(printf '%s' "$__aliasc_fallback_line" | command sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-        case "$__aliasc_fallback_line" in
-            ''|\#*|include\ *) continue ;;
-            \[*\])
-                __aliasc_fallback_section=${__aliasc_fallback_line#\[}
-                __aliasc_fallback_section=${__aliasc_fallback_section%\]}
-                ;;
-            *=*)
-                __aliasc_fallback_section_active "$__aliasc_fallback_section" || continue
-                __aliasc_fallback_name=${__aliasc_fallback_line%%=*}
-                __aliasc_fallback_body=${__aliasc_fallback_line#*=}
-                __aliasc_fallback_body=$(printf '%s' "$__aliasc_fallback_body" | command sed 's/ #.*//')
-                [ -n "$__aliasc_fallback_name" ] || continue
-                __aliasc_fallback_define "$__aliasc_fallback_name" "$__aliasc_fallback_body"
-                ;;
-        esac
+        if [ "$__aliasc_fallback_in_multiline" -eq 1 ]; then
+            case "$__aliasc_fallback_line" in
+                ''|\#*) continue ;;
+                *)
+                    __aliasc_fallback_multiline_body="${__aliasc_fallback_multiline_body},${__aliasc_fallback_line}"
+                    __aliasc_fallback_multiline_paren=$(printf '%s' "$__aliasc_fallback_multiline_body" | command tr -cd '(' | command wc -c)
+                    __aliasc_fallback_multiline_paren=$((__aliasc_fallback_multiline_paren - $(printf '%s' "$__aliasc_fallback_multiline_body" | command tr -cd ')' | command wc -c)))
+                    if [ "$__aliasc_fallback_multiline_paren" -le 0 ]; then
+                        __aliasc_fallback_in_multiline=0
+                        __aliasc_fallback_body=$(printf '%s' "$__aliasc_fallback_multiline_body" | command sed 's/ #.*//')
+                        __aliasc_fallback_define "$__aliasc_fallback_multiline_name" "$__aliasc_fallback_body"
+                    fi
+                    ;;
+            esac
+        else
+            case "$__aliasc_fallback_line" in
+                ''|\#*|include\ *) continue ;;
+                \[*\])
+                    __aliasc_fallback_section=${__aliasc_fallback_line#\[}
+                    __aliasc_fallback_section=${__aliasc_fallback_section%\]}
+                    ;;
+                *=*)
+                    __aliasc_fallback_section_active "$__aliasc_fallback_section" || continue
+                    __aliasc_fallback_name=${__aliasc_fallback_line%%=*}
+                    __aliasc_fallback_body=${__aliasc_fallback_line#*=}
+                    __aliasc_fallback_body=$(printf '%s' "$__aliasc_fallback_body" | command sed 's/ #.*//')
+                    [ -n "$__aliasc_fallback_name" ] || continue
+                    __aliasc_fallback_multiline_paren=$(printf '%s' "$__aliasc_fallback_body" | command tr -cd '(' | command wc -c)
+                    __aliasc_fallback_multiline_paren=$((__aliasc_fallback_multiline_paren - $(printf '%s' "$__aliasc_fallback_body" | command tr -cd ')' | command wc -c)))
+                    if [ "$__aliasc_fallback_multiline_paren" -gt 0 ]; then
+                        __aliasc_fallback_in_multiline=1
+                        __aliasc_fallback_multiline_name=$__aliasc_fallback_name
+                        __aliasc_fallback_multiline_body=$__aliasc_fallback_body
+                    else
+                        __aliasc_fallback_define "$__aliasc_fallback_name" "$__aliasc_fallback_body"
+                    fi
+                    ;;
+            esac
+        fi
     done < "$1"
 }
 
