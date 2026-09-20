@@ -289,7 +289,7 @@ fi
 __aliasc_binary=$("$__aliasc_downloader" --print-binary-path 2>/dev/null) || true
 if [ -z "$__aliasc_binary" ] || [ ! -x "$__aliasc_binary" ]; then
     printf '%s\n' "aliasc: binary not found; attempting download..." >&2
-    "$__aliasc_downloader" >/dev/null 2>&1 || {
+    "$__aliasc_downloader" >/dev/null || {
         printf '%s\n' 'aliasc: download failed; using shell fallback' >&2
         __aliasc_fallback=1
         __aliasc_wait_after_error
@@ -324,7 +324,7 @@ if [ "$__aliasc_needs_compile" -eq 1 ]; then
         --distro auto \
         --environment auto \
         --source "$ALIAS_FILE" \
-        --output "$ALIASC_OUTPUT" >/dev/null 2>&1; then
+        --output "$ALIASC_OUTPUT" >/dev/null; then
         __aliasc_fallback=1
         printf '%s\n' 'aliasc: compilation failed; using shell fallback' >&2
         __aliasc_wait_after_error
