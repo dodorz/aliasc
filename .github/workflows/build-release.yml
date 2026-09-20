@@ -73,6 +73,11 @@ jobs:
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             asset: aliasc-x86_64-unknown-linux-gnu
+          - name: Linux x64 (musl)
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            asset: aliasc-x86_64-unknown-linux-musl
+            musl: true
           - name: Android ARM64 (Termux)
             os: ubuntu-latest
             target: aarch64-linux-android
@@ -101,14 +106,29 @@ jobs:
         run: |
           echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=${{ steps.android-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang" >> "$GITHUB_ENV"
 
+      - name: Install musl toolchain
+        if: matrix.musl
+        shell: bash
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
       - name: Build release binary
         run: cargo build --locked --release --target ${{ matrix.target }}
+        env:
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C target-feature=+crt-static -C link-arg=-static"
 
       - name: Verify Android ARM64 binary
         if: matrix.android_ndk
         shell: bash
         run: |
           readelf -h "target/${{ matrix.target }}/release/aliasc" | grep -Eq 'Machine:.*AArch64'
+
+      - name: Verify musl binary is statically linked
+        if: matrix.musl
+        shell: bash
+        run: |
+          file "target/${{ matrix.target }}/release/aliasc"
+          ! readelf -l "target/${{ matrix.target }}/release/aliasc" | grep -q 'interpreter'
 
       - name: Package Windows binary
         if: runner.os == 'Windows'
