@@ -524,8 +524,25 @@ fn cmd_alias_search_renders_multiline_definition_on_one_line() {
     let mut o=options(source,Platform::Windows); o.context.shell=Shell::Cmd;
     let model=compile_model(&o).unwrap(); let generated=backend::generate(&model.context,&model.definitions).unwrap();
     let runtime=&generated.sibling.unwrap().1;
-    assert!(runtime.contains("echo definition: FirstAvailable( batcat bat )"));
+    assert!(runtime.contains("echo definition: FirstAvailable^( batcat bat ^)"));
     assert!(!runtime.contains("definition: FirstAvailable(\n"));
+}
+
+#[test]
+fn cmd_alias_search_escapes_parens_and_ampersands_in_definition_text() {
+    let d=tempdir().unwrap(); let source=d.path().join("alias");
+    fs::write(&source,"[Common]\npi=FirstAvailable(pi, fallback)\nproxy=WithEnv(HTTPS_PROXY=localhost) antigravity-cli\npipe=a | b\n").unwrap();
+    let mut o=options(source,Platform::Windows); o.context.shell=Shell::Cmd;
+    let model=compile_model(&o).unwrap(); let generated=backend::generate(&model.context,&model.definitions).unwrap();
+    let runtime=&generated.sibling.unwrap().1;
+    // Parentheses from FirstAvailable( ... ) must be caret-escaped so cmd.exe
+    // does not treat them as if-block boundaries.
+    assert!(runtime.contains("echo definition: FirstAvailable^(pi, fallback^)"));
+    assert!(!runtime.contains("echo definition: FirstAvailable(pi, fallback)"));
+    // Parentheses from WithEnv( ... ) must also be escaped.
+    assert!(runtime.contains("echo definition: WithEnv^(HTTPS_PROXY=localhost^) antigravity-cli"));
+    // Pipe characters must be escaped too.
+    assert!(runtime.contains("echo definition: a ^| b"));
 }
 
 #[test]
