@@ -609,3 +609,103 @@ fn backslash_command_renders_native_for_all_shells() {
         }
     }
 }
+
+#[test]
+fn seq_parses_basic() {
+    let span=SourceSpan{file:PathBuf::from("fixture"),line:1,column:1};
+    let parsed=parse_template("Seq(cmd1,cmd2,cmd3)",&span,&[]).unwrap();
+    let Template::Seq(commands)=&parsed else { panic!("expected Seq") };
+    assert_eq!(commands.len(),3);
+    assert!(!commands[0].is_async);
+    assert!(!commands[1].is_async);
+    assert!(!commands[2].is_async);
+}
+
+#[test]
+fn seq_parses_multiline() {
+    let d=tempdir().unwrap(); let source=d.path().join("alias");
+    fs::write(&source,"[Common]\nrun=Seq(\n  printf first\n  printf second\n)\n").unwrap();
+    let model=compile_model(&options(source,Platform::Linux)).unwrap();
+    let run=model.definitions.iter().find(|d|d.name=="run").unwrap();
+    let Template::Seq(commands)=&run.template else { panic!("expected Seq") };
+    assert_eq!(commands.len(),2);
+}
+
+#[test]
+fn seq_async_prefix() {
+    let span=SourceSpan{file:PathBuf::from("fixture"),line:1,column:1};
+    let parsed=parse_template("Seq(cmd1, &cmd2, cmd3)",&span,&[]).unwrap();
+    let Template::Seq(commands)=&parsed else { panic!("expected Seq") };
+    assert_eq!(commands.len(),3);
+    assert!(!commands[0].is_async);
+    assert!(commands[1].is_async);
+    assert!(!commands[2].is_async);
+}
+
+#[test]
+fn seq_rejects_just_ampersand() {
+    let span=SourceSpan{file:PathBuf::from("fixture"),line:1,column:1};
+    assert!(parse_template("Seq(&)",&span,&[]).is_err());
+}
+
+#[test]
+fn seq_rejects_forbidden_syntax() {
+    let span=SourceSpan{file:PathBuf::from("fixture"),line:1,column:1};
+    assert!(parse_template("Seq(cmd1;cmd2)",&span,&[]).is_err());
+}
+
+#[test]
+fn seq_backend_renders_blocking_commands() {
+    let d=tempdir().unwrap(); let source=d.path().join("alias");
+    fs::write(&source,"[Common]\nrun=Seq(printf first, printf second)\n").unwrap();
+    for (shell,platform) in [(Shell::Posix,Platform::Linux),(Shell::Bash,Platform::Linux),(Shell::Fish,Platform::Linux),(Shell::Nu,Platform::Linux)] {
+        let mut o=options(source.clone(),platform); o.context.shell=shell;
+        let model=compile_model(&o).unwrap(); let generated=backend::generate(&model.context,&model.definitions).unwrap();
+        assert!(generated.primary.contains("'first'"),"{shell:?} primary missing 'first'");
+        assert!(generated.primary.contains("'second'"),"{shell:?} primary missing 'second'");
+    }
+}
+
+#[test]
+fn seq_backend_renders_async_command() {
+    let d=tempdir().unwrap(); let source=d.path().join("alias");
+    fs::write(&source,"[Common]\nrun=Seq(printf first, &printf second)\n").unwrap();
+    let model=compile_model(&options(source,Platform::Linux)).unwrap();
+    let generated=backend::generate(&model.context,&model.definitions).unwrap();
+    eprintln!("ASYNC PRIMARY:\n{}", generated.primary);
+    assert!(generated.primary.contains("'second'"),"missing 'second'");
+    assert!(generated.primary.contains("&"),"missing &");
+}
+
+#[test]
+fn seq_backend_renders_ps_background() {
+    let d=tempdir().unwrap(); let source=d.path().join("alias");
+    fs::write(&source,"[Common]\nrun=Seq(printf first, &printf second)\n").unwrap();
+    let mut o=options(source,Platform::Windows); o.context.shell=Shell::Powershell;
+    let model=compile_model(&o).unwrap(); let generated=backend::generate(&model.context,&model.definitions).unwrap();
+    assert!(generated.primary.contains("Start-Job"));
+}
+
+#[test]
+fn seq_backend_renders_cmd_background() {
+    let d=tempdir().unwrap(); let source=d.path().join("alias");
+    fs::write(&source,"[Common]\nrun=Seq(printf first, &printf second)\n").unwrap();
+    let mut o=options(source,Platform::Windows); o.context.shell=Shell::Cmd;
+    let model=compile_model(&o).unwrap(); let generated=backend::generate(&model.context,&model.definitions).unwrap();
+    let sibling_text=generated.sibling.as_ref().map(|(_,body)|body.as_str()).unwrap_or("");
+    assert!(sibling_text.contains("start /b"),"cmd sibling missing start /b: {sibling_text}");
+}
+
+#[test]
+fn seq_multiline_matches_single_line_form() {
+    let d=tempdir().unwrap(); let source=d.path().join("alias");
+    fs::write(&source,"[Common]\nrun=Seq(\n  printf first\n  printf second\n)\n").unwrap();
+    let model=compile_model(&options(source.clone(),Platform::Linux)).unwrap();
+    let multiline_def=model.definitions.iter().find(|d|d.name=="run").unwrap();
+    let Template::Seq(commands)=&multiline_def.template else { panic!("expected Seq") };
+    assert_eq!(commands.len(),2);
+    fs::write(&source,"[Common]\nrun=Seq(printf first, printf second)\n").unwrap();
+    let single=compile_model(&options(source,Platform::Linux)).unwrap();
+    let single_def=single.definitions.iter().find(|d|d.name=="run").unwrap();
+    assert_eq!(format!("{:?}",multiline_def.template),format!("{:?}",single_def.template));
+}

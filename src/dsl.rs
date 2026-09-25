@@ -17,9 +17,9 @@ pub struct RawDefinition { pub name: String, pub body: String, pub section: Opti
 #[derive(Clone, Debug)]
 pub struct Definition { pub name: String, pub template: Template, pub span: SourceSpan, pub legacy: bool, pub context: Context, pub section: Option<String>, pub body: String }
 #[derive(Clone, Debug)]
-pub enum Template { Command(CommandTemplate), SetEnv(Vec<(String, String)>), UnsetEnv(Vec<String>), WithEnv { vars: Vec<(String,String)>, body: Option<Box<CommandTemplate>> }, FirstAvailable(Vec<CommandTemplate>), LegacyCmdTemplate(String) }
+pub enum Template { Command(CommandTemplate), SetEnv(Vec<(String, String)>), UnsetEnv(Vec<String>), WithEnv { vars: Vec<(String,String)>, body: Option<Box<CommandTemplate>> }, FirstAvailable(Vec<CommandTemplate>), Seq(Vec<CommandTemplate>), LegacyCmdTemplate(String) }
 #[derive(Clone, Debug)]
-pub struct CommandTemplate { pub pipeline: Pipeline, pub implicit_all: bool, pub bypass_shell_function: bool }
+pub struct CommandTemplate { pub pipeline: Pipeline, pub implicit_all: bool, pub bypass_shell_function: bool, pub is_async: bool }
 #[derive(Clone, Debug)]
 pub struct Pipeline { pub commands: Vec<CommandInvocation> }
 #[derive(Clone, Debug)]
@@ -35,6 +35,7 @@ pub fn valid_name(name: &str) -> bool { !name.is_empty() && !name.contains(char:
 pub fn parse_template(body: &str, span: &SourceSpan, stack: &[PathBuf]) -> Result<Template, Diagnostic> {
     let b = body.trim();
     if b.starts_with("Shell:") { return Err(err(span, "Shell:<dialect>[...] is not supported by Alias DSL v2", stack)); }
+    if let Some(content) = wrapped(b, "Seq") { return parse_seq(content, span, stack); }
     if has_forbidden_shell_syntax(b) { return Err(err(span, "portable template contains unsupported shell syntax", stack)); }
     if let Some(content) = wrapped(b, "SetEnv") { return parse_assignments(content, span, stack).map(Template::SetEnv); }
     if let Some(content) = wrapped(b, "UnsetEnv") { return parse_names(content, span, stack).map(Template::UnsetEnv); }
@@ -43,6 +44,30 @@ pub fn parse_template(body: &str, span: &SourceSpan, stack: &[PathBuf]) -> Resul
     let b = match b.strip_prefix("?(") { Some(rest) => { expanded = format!("FirstAvailable({rest}"); expanded.as_str() } None => b };
     if let Some(content) = wrapped(b, "FirstAvailable") { let mut candidates = Vec::new(); for p in split_top(content, ',') { let multiline = p.contains('\n'); for piece in split_top(p, '\n') { let piece = piece.trim(); if piece.is_empty() { if multiline { continue; } return Err(err(span, "FirstAvailable has an empty candidate", stack)); } candidates.push(parse_command(piece, span, stack)?); } } if candidates.is_empty() { return Err(err(span, "FirstAvailable needs a candidate", stack)); } return Ok(Template::FirstAvailable(candidates)); }
     Ok(Template::Command(parse_command(b, span, stack)?))
+}
+fn parse_seq(content: &str, span: &SourceSpan, stack: &[PathBuf]) -> Result<Template, Diagnostic> {
+    let mut commands = Vec::new();
+    for p in split_top(content, ',') {
+        let multiline = p.contains('\n');
+        for piece in split_top(p, '\n') {
+            let piece = piece.trim();
+            if piece.is_empty() {
+                if multiline { continue; }
+                return Err(err(span, "Seq has an empty command", stack));
+            }
+            let is_async = piece.starts_with('&');
+            let cmd_str = if is_async { piece[1..].trim() } else { piece };
+            if cmd_str.is_empty() {
+                return Err(err(span, "Seq command cannot be just '&'", stack));
+            }
+            if has_forbidden_shell_syntax(cmd_str) { return Err(err(span, "portable template contains unsupported shell syntax", stack)); }
+            let mut cmd = parse_command(cmd_str, span, stack)?;
+            cmd.is_async = is_async;
+            commands.push(cmd);
+        }
+    }
+    if commands.is_empty() { return Err(err(span, "Seq needs at least one command", stack)); }
+    Ok(Template::Seq(commands))
 }
 fn has_forbidden_shell_syntax(s: &str) -> bool { let chars: Vec<char> = s.chars().collect(); let mut quote = None; let mut i = 0; while i < chars.len() { let c = chars[i]; if let Some(q) = quote { if q == '"' && c == '\\' && chars.get(i + 1).is_some() { i += 2; continue; } if c == q { quote = None; } else if c == '`' { return true; } i += 1; continue; } match c { '\'' | '"' => quote = Some(c), '`' | ';' => return true, '&' if chars.get(i + 1) == Some(&'&') => return true, '|' if chars.get(i + 1) == Some(&'|') => return true, _ => {} } i += 1; } false }
 fn err(span: &SourceSpan, message: impl Into<String>, stack: &[PathBuf]) -> Diagnostic { Diagnostic::error(span.clone(), message, stack.to_vec()) }
@@ -56,7 +81,7 @@ fn split_words(s:&str,span:&SourceSpan,stack:&[PathBuf])->Result<Vec<String>,Dia
 fn parse_command(s:&str,span:&SourceSpan,stack:&[PathBuf])->Result<CommandTemplate,Diagnostic>{ let tokens=tokenize(s,span,stack)?; let tokens: Vec<Tok> = { let mut out=Vec::new(); let mut iter=tokens.into_iter().peekable(); while let Some(tok)=iter.next() { let merged=if let Tok::Word(w)=&tok { if !w.raw.is_empty()&&w.raw.chars().all(|c|c.is_ascii_digit()) { match iter.peek() { Some(Tok::Op(op)) if op==">"||op=="<"||op==">>" => Some(format!("{}{}",w.raw,op)), _=>None } } else { None } } else { None }; match merged { Some(combined)=>{ iter.next(); out.push(Tok::Op(combined)); } None=>{ out.push(tok); } } } out };
      let mut pipeline=Pipeline{commands:Vec::new()}; let mut current=CommandInvocation{arguments:Vec::new(),input:None,output:Vec::new(),bypass_shell_function:false}; let mut need_redirect:Option<String>=None; let mut saw=false; let mut any_placeholder=false;
   for tok in tokens { match tok { Tok::Op(op) if op=="|"=> { if current.arguments.is_empty(){return Err(err(span,"pipeline has an empty command",stack));} pipeline.commands.push(current);current=CommandInvocation{arguments:Vec::new(),input:None,output:Vec::new(),bypass_shell_function:false}; }, Tok::Op(op) if op=="<"||op==">"||op==">>"||op.ends_with('>')||op.ends_with('<')=>{if need_redirect.is_some(){return Err(err(span,"redirection is missing a target",stack));}need_redirect=Some(op)}, Tok::Op(op)=>return Err(err(span,format!("unsupported operator `{op}`"),stack)), Tok::Word(w)=>{saw=true; any_placeholder|=contains_placeholder(&w.arg);if let Some(op)=need_redirect.take(){if w.arg.all_arguments{return Err(err(span,"@* cannot be a redirection target",stack));}if op.ends_with("<"){if current.input.replace(w.arg).is_some(){return Err(err(span,"more than one input redirection",stack));}}else{let fd:u8=op.chars().take_while(|c|c.is_ascii_digit()).collect::<String>().parse().unwrap_or(1);current.output.push((w.arg,op.ends_with(">>"),fd))}}else{current.arguments.push(w.arg)}} }}
-  if need_redirect.is_some(){return Err(err(span,"redirection is missing a target",stack));}if !saw||current.arguments.is_empty(){return Err(err(span,"expected a command invocation",stack));}if let Some(first_arg)=current.arguments.first_mut(){if first_arg.segments.len()==1{if let ArgumentSegment::Literal(v)=&mut first_arg.segments[0]{if let Some(stripped)=v.strip_prefix('\\'){*v=stripped.to_string();current.bypass_shell_function=true;}}}}pipeline.commands.push(current);for command in &pipeline.commands { if command.arguments.first().is_some_and(is_assignment_word) { return Err(err(span,"name=value command prefixes are not portable Alias DSL syntax",stack)); } }Ok(CommandTemplate{pipeline,implicit_all:!any_placeholder,bypass_shell_function:false}) }
+  if need_redirect.is_some(){return Err(err(span,"redirection is missing a target",stack));}if !saw||current.arguments.is_empty(){return Err(err(span,"expected a command invocation",stack));}if let Some(first_arg)=current.arguments.first_mut(){if first_arg.segments.len()==1{if let ArgumentSegment::Literal(v)=&mut first_arg.segments[0]{if let Some(stripped)=v.strip_prefix('\\'){*v=stripped.to_string();current.bypass_shell_function=true;}}}}pipeline.commands.push(current);for command in &pipeline.commands { if command.arguments.first().is_some_and(is_assignment_word) { return Err(err(span,"name=value command prefixes are not portable Alias DSL syntax",stack)); } }Ok(CommandTemplate{pipeline,implicit_all:!any_placeholder,bypass_shell_function:false,is_async:false}) }
 fn is_assignment_word(a:&Argument)->bool { if a.quoted || a.segments.len()!=1 { return false; } match &a.segments[0] { ArgumentSegment::Literal(s)=>s.split_once('=').is_some_and(|(name,_)|valid_env(name)), _=>false } }
 fn contains_placeholder(a:&Argument)->bool{a.segments.iter().any(|s|matches!(s,ArgumentSegment::Positional(_)|ArgumentSegment::AllArguments))}
 fn tokenize(s:&str,span:&SourceSpan,stack:&[PathBuf])->Result<Vec<Tok>,Diagnostic>{let mut out=Vec::new();let chars:Vec<char>=s.chars().collect();let(mut i,mut buf,mut segs,mut quote,mut quoted)=(0usize,String::new(),Vec::new(),None,false);let flush=|buf:&mut String,segs:&mut Vec<ArgumentSegment>,quoted:bool,out:&mut Vec<Tok>|->Result<(),Diagnostic>{if !buf.is_empty(){segs.push(ArgumentSegment::Literal(std::mem::take(buf)));}if !segs.is_empty(){let all=segs.len()==1&&matches!(segs[0],ArgumentSegment::AllArguments)&&!quoted;if segs.iter().any(|x|matches!(x,ArgumentSegment::AllArguments))&&!all{return Err(err(span,"@* must be an unquoted standalone argument",stack));}let raw=segs.iter().filter_map(|s|match s{ArgumentSegment::Literal(v)=>Some(v.as_str()),ArgumentSegment::LiteralAt=>Some("@"),_=>None}).collect::<String>();out.push(Tok::Word(Word{raw,arg:Argument{segments:std::mem::take(segs),quoted,all_arguments:all}}));}Ok(())};
