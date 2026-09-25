@@ -30,7 +30,7 @@ if (-not $stale) {
     if ($exists -ne [bool]$input.exists) { $stale = $true; $reason += "input existence changed: $($input.path)"; continue }
     if ($exists) {
       $item = Get-Item -LiteralPath $input.path
-      if ($item.Length -ne [int64]$input.size -or ($item.LastWriteTimeUtc.Ticks * 100) -ne [int64]$input.mtime_ns) { $stale = $true; $reason += "input changed: $($input.path)" }
+      if ($item.Length -ne [int64]$input.size -or (($item.LastWriteTimeUtc.Ticks - 621355968000000000) * 100) -ne [int64]$input.mtime_ns) { $stale = $true; $reason += "input changed: $($input.path)" }
     }
   }
   foreach ($generated in $manifest.outputs) { if (-not (Test-Path -LiteralPath $generated.path -PathType Leaf)) { $stale = $true; $reason += "generated output missing: $($generated.path)" } }
