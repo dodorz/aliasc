@@ -393,7 +393,7 @@ fn multiline_first_available_matches_single_line_form() {
     let Template::FirstAvailable(candidates)=&definition.template else { panic!("expected FirstAvailable") };
     assert_eq!(candidates.iter().map(first_argument_literal).collect::<Vec<_>>(),vec!["batcat","bat","ccat","cat"]);
     let multiline=backend::generate(&model.context,&model.definitions).unwrap().primary;
-    assert!(multiline.contains("definition: FirstAvailable( batcat bat ccat cat )"));
+    assert!(multiline.contains("definition: FirstAvailable(batcat, bat, ccat, cat)"));
     fs::write(&source,"[Common]\ncat=FirstAvailable(batcat, bat, ccat, cat)\n").unwrap();
     let single=compile_model(&options(source,Platform::Linux)).unwrap();
     let single_definition=single.definitions.iter().find(|d|d.name=="cat").unwrap();
@@ -524,7 +524,7 @@ fn cmd_alias_search_renders_multiline_definition_on_one_line() {
     let mut o=options(source,Platform::Windows); o.context.shell=Shell::Cmd;
     let model=compile_model(&o).unwrap(); let generated=backend::generate(&model.context,&model.definitions).unwrap();
     let runtime=&generated.sibling.unwrap().1;
-    assert!(runtime.contains("echo definition: FirstAvailable^( batcat bat ^)"));
+    assert!(runtime.contains("echo definition: FirstAvailable^(batcat, bat^)"));
     assert!(!runtime.contains("definition: FirstAvailable(\n"));
 }
 
