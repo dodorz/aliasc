@@ -62,11 +62,11 @@ jobs:
             target: aarch64-pc-windows-msvc
             asset: aliasc-aarch64-pc-windows-msvc.exe
           - name: macOS Intel
-            os: macos-14
+            os: macos-15
             target: x86_64-apple-darwin
             asset: aliasc-x86_64-apple-darwin
           - name: macOS Apple Silicon
-            os: macos-14
+            os: macos-15
             target: aarch64-apple-darwin
             asset: aliasc-aarch64-apple-darwin
           - name: Linux x64
