@@ -262,6 +262,10 @@ __aliasc_fallback_load() {
     __aliasc_fallback_section=
     __aliasc_fallback_parse_file "$ALIAS_FILE"
     __aliasc_fallback_parse_file "$ALIASC_LOCAL_FILE"
+    unalias raw 2>/dev/null || :
+    raw() {
+        command "$@"
+    }
 }
 
 __aliasc_wait_after_error() {

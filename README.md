@@ -56,6 +56,30 @@ posix, bash, zsh, fish, nu, powershell, pwsh, cmd
 
 `powershell` and `pwsh` require a Windows target context. Cross-generation is supported, for example a Linux host can compile with `--platform windows`.
 
+## Bypassing Aliases
+
+Each backend has a supported spelling for running the command underneath an alias. These spellings are pinned by the test suite and the CI shell matrix wherever the runner provides the shell.
+
+Every generated artifact also defines `raw`, a uniform escape hatch that works the same way in every target shell:
+
+```text
+raw XXX
+```
+
+`raw XXX` runs the external command `XXX` instead of the alias generated for it, so it does not depend on remembering the shell-native spelling below. The per-shell forms remain supported for direct use.
+
+| Target shell | Run the real command | Notes |
+| --- | --- | --- |
+| `posix`, `bash`, `zsh` | `command XXX` | The generated artifact defines shell functions. |
+| `fish` | `command XXX` | fish has no alias/function distinction; its `alias` is function syntax. |
+| `nu` | `^XXX` | The generated artifact defines `def` commands. |
+| `powershell`, `pwsh` | `XXX.exe`, or `& (Get-Command XXX -CommandType Application).Path` | `\` is not an escape character in PowerShell. |
+| `cmd` | `cmd /c XXX` | doskey macros are session-scoped; a fresh `cmd /c` only sees the real command. |
+
+On POSIX shells, `\XXX` is **not** a bypass and must not be treated as one. A backslash only suppresses alias expansion, and aliasc defines shell functions rather than aliases, so `\XXX` silently executes the alias body instead of the external command. Use `command XXX`.
+
+The `\` prefix inside an alias body (`cat=\cat -n`) means something different: it is DSL syntax that makes the compiler emit `command`, so the alias body calls the external command instead of recursing into the alias. The two uses are unrelated, and the body form is unaffected by the limitation above.
+
 ## Source Resolution
 
 - `include "path"` is expanded relative to the including file.

@@ -119,6 +119,7 @@ fn recursive_same_named_commands_render_external_calls() {
 #[test]
 fn zsh_executes_nested_same_named_commands_without_recursion() {
     use std::{os::unix::fs::PermissionsExt, process::Command};
+    if Command::new("zsh").arg("--version").output().is_err() { return; }
     let d=tempdir().unwrap(); let root=d.path(); let source=root.join("alias"); let output=root.join("aliases.zsh");
     fs::write(root.join("aichat"),"#!/bin/sh\nif [ \"$1\" = \"--list-models\" ]; then printf 'model\\n'; else printf 'outer %s\\n' \"$*\"; fi\n").unwrap();
     fs::write(root.join("fzf"),"#!/bin/sh\ncat\n").unwrap();
@@ -132,6 +133,139 @@ fn zsh_executes_nested_same_named_commands_without_recursion() {
     assert!(result.status.success(),"{}",String::from_utf8_lossy(&result.stderr));
     assert_eq!(String::from_utf8_lossy(&result.stdout),"outer -m model\n");
     assert!(!String::from_utf8_lossy(&result.stderr).contains("maximum nested function level reached"));
+}
+
+/// `command XXX` is the documented POSIX bypass: it skips shell functions, so it reaches the
+/// external command even though the generated artifact defines `foo` as a function.
+/// `\xxx` is deliberately NOT a bypass there and is pinned below so that a future switch to real
+/// aliases fails loudly instead of silently changing what users get.
+#[cfg(unix)]
+#[test]
+fn command_builtin_bypasses_generated_alias_body_on_posix_bash_and_zsh() {
+    use std::{os::unix::fs::PermissionsExt, process::Command};
+    let d=tempdir().unwrap(); let root=d.path(); let source=root.join("alias");
+    fs::write(root.join("foo"),"#!/bin/sh\nprintf '%s\\n' external-foo\n").unwrap();
+    fs::set_permissions(root.join("foo"),fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(&source,"[Common]\nfoo=printf '%s\\n' aliasc-foo\n").unwrap();
+    let path=format!("{}:{}",root.display(),std::env::var("PATH").unwrap_or_default());
+    for (shell,binary,zsh) in [(Shell::Posix,"dash",false),(Shell::Bash,"bash",false),(Shell::Zsh,"zsh",true)] {
+        if Command::new(binary).arg("--version").output().is_err() { continue; }
+        let mut options=options(source.clone(),Platform::Linux); options.context.shell=shell;
+        let model=compile_model(&options).unwrap();
+        let generated=backend::generate(&model.context,&model.definitions).unwrap();
+        let output=root.join(format!("aliases-{binary}.sh")); fs::write(&output,&generated.primary).unwrap();
+        let mut command=Command::new(binary);
+        if zsh { command.arg("-f"); }
+        let result=command.arg("-c").arg(". \"$1\"; foo; command foo; \\foo").arg("test").arg(&output).env("PATH",&path).output().unwrap();
+        assert!(result.status.success(),"{binary}: {}",String::from_utf8_lossy(&result.stderr));
+        assert_eq!(String::from_utf8_lossy(&result.stdout),"aliasc-foo\nexternal-foo\naliasc-foo\n","{binary}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn command_builtin_bypasses_generated_alias_body_on_fish() {
+    use std::{os::unix::fs::PermissionsExt, process::Command};
+    if Command::new("fish").arg("--version").output().is_err() { return; }
+    let d=tempdir().unwrap(); let root=d.path(); let source=root.join("alias");
+    fs::write(root.join("foo"),"#!/bin/sh\nprintf '%s\\n' external-foo\n").unwrap();
+    fs::set_permissions(root.join("foo"),fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(&source,"[Common]\nfoo=printf '%s\\n' aliasc-foo\n").unwrap();
+    let mut options=options(source,Platform::Linux); options.context.shell=Shell::Fish;
+    let model=compile_model(&options).unwrap();
+    let generated=backend::generate(&model.context,&model.definitions).unwrap();
+    let output=root.join("aliases.fish"); fs::write(&output,&generated.primary).unwrap();
+    let path=format!("{}:{}",root.display(),std::env::var("PATH").unwrap_or_default());
+    let result=Command::new("fish").arg("-c").arg("source $argv[1]; foo; command foo").arg("fish").arg(&output).env("PATH",path).output().unwrap();
+    assert!(result.status.success(),"{}",String::from_utf8_lossy(&result.stderr));
+    assert_eq!(String::from_utf8_lossy(&result.stdout),"aliasc-foo\nexternal-foo\n");
+}
+
+/// `raw XXX` is the uniform escape hatch: it must reach the external command instead of the
+/// generated alias body on every supported shell.
+#[test]
+fn raw_escape_hatch_is_emitted_for_all_shells() {
+    let d=tempdir().unwrap(); let source=d.path().join("alias");
+    fs::write(&source,"[Common]\nfoo=printf foo\n").unwrap();
+    for (shell,platform) in [(Shell::Posix,Platform::Linux),(Shell::Bash,Platform::Linux),(Shell::Zsh,Platform::Linux),(Shell::Fish,Platform::Linux),(Shell::Nu,Platform::Linux),(Shell::Powershell,Platform::Windows),(Shell::Pwsh,Platform::Windows),(Shell::Cmd,Platform::Windows)] {
+        let mut o=options(source.clone(),platform); o.context.shell=shell;
+        let model=compile_model(&o).unwrap(); let generated=backend::generate(&model.context,&model.definitions).unwrap();
+        let text=generated.sibling.map(|(_,body)|format!("{}\n{}",generated.primary,body)).unwrap_or(generated.primary);
+        match shell {
+            Shell::Posix|Shell::Bash|Shell::Zsh => assert!(text.contains("raw() {\n  command \"$@\"\n}"),"{shell:?} missing raw escape hatch"),
+            Shell::Fish => assert!(text.contains("function raw\n    command $argv\nend"),"{shell:?} missing raw escape hatch"),
+            Shell::Nu => assert!(text.contains("def --wrapped raw [...alias_args] {\n  run-external ...$alias_args\n}"),"{shell:?} missing raw escape hatch"),
+            Shell::Powershell|Shell::Pwsh => assert!(text.contains("function raw {")&&text.contains("-CommandType Application"),"{shell:?} missing raw escape hatch"),
+            Shell::Cmd => {
+                assert!(text.contains("raw=call \"%~dp0aliasc-runtime.cmd\" raw $*"),"{shell:?} missing raw macro");
+                assert!(text.contains(":raw\nshift /1\n"),"{shell:?} missing raw runtime label");
+                assert!(text.contains("call :__aliasc_find_external \"%~1\" __aliasc_raw_exec"),"{shell:?} missing raw external lookup");
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn raw_escape_hatch_bypasses_generated_alias_body_on_posix() {
+    use std::{os::unix::fs::PermissionsExt, process::Command};
+    let d=tempdir().unwrap(); let root=d.path(); let source=root.join("alias");
+    fs::write(root.join("foo"),"#!/bin/sh\nprintf 'external-foo %s\\n' \"$*\"\n").unwrap();
+    fs::set_permissions(root.join("foo"),fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(&source,"[Common]\nfoo=printf '%s\\n' aliasc-foo\n").unwrap();
+    let path=format!("{}:{}",root.display(),std::env::var("PATH").unwrap_or_default());
+    for (shell,binary,zsh) in [(Shell::Posix,"dash",false),(Shell::Bash,"bash",false),(Shell::Zsh,"zsh",true)] {
+        if Command::new(binary).arg("--version").output().is_err() { continue; }
+        let mut options=options(source.clone(),Platform::Linux); options.context.shell=shell;
+        let model=compile_model(&options).unwrap();
+        let generated=backend::generate(&model.context,&model.definitions).unwrap();
+        let output=root.join(format!("raw-{binary}.sh")); fs::write(&output,&generated.primary).unwrap();
+        let mut command=Command::new(binary);
+        if zsh { command.arg("-f"); }
+        let result=command.arg("-c").arg(". \"$1\"; foo; raw foo arg1 arg2").arg("test").arg(&output).env("PATH",&path).output().unwrap();
+        assert!(result.status.success(),"{binary}: {}",String::from_utf8_lossy(&result.stderr));
+        assert_eq!(String::from_utf8_lossy(&result.stdout),"aliasc-foo\nexternal-foo arg1 arg2\n","{binary}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn raw_escape_hatch_bypasses_generated_alias_body_on_fish() {
+    use std::{os::unix::fs::PermissionsExt, process::Command};
+    if Command::new("fish").arg("--version").output().is_err() { return; }
+    let d=tempdir().unwrap(); let root=d.path(); let source=root.join("alias");
+    fs::write(root.join("foo"),"#!/bin/sh\nprintf 'external-foo %s\\n' \"$*\"\n").unwrap();
+    fs::set_permissions(root.join("foo"),fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(&source,"[Common]\nfoo=printf '%s\\n' aliasc-foo\n").unwrap();
+    let mut options=options(source,Platform::Linux); options.context.shell=Shell::Fish;
+    let model=compile_model(&options).unwrap();
+    let generated=backend::generate(&model.context,&model.definitions).unwrap();
+    let output=root.join("aliases.fish"); fs::write(&output,&generated.primary).unwrap();
+    let path=format!("{}:{}",root.display(),std::env::var("PATH").unwrap_or_default());
+    let result=Command::new("fish").arg("-c").arg("source $argv[1]; foo; raw foo arg1 arg2").arg("fish").arg(&output).env("PATH",path).output().unwrap();
+    assert!(result.status.success(),"{}",String::from_utf8_lossy(&result.stderr));
+    assert_eq!(String::from_utf8_lossy(&result.stdout),"aliasc-foo\nexternal-foo arg1 arg2\n");
+}
+
+/// PowerShell has no backslash escape, so the documented bypass there is naming the executable
+/// explicitly (`hello.bat` on this fixture), which no longer matches the generated function.
+#[cfg(windows)]
+#[test]
+fn exe_suffix_bypasses_generated_alias_body_on_powershell() {
+    use std::process::Command;
+    if Command::new("pwsh").arg("--version").output().is_err() { return; }
+    let d=tempdir().unwrap(); let root=d.path(); let source=root.join("alias");
+    fs::write(root.join("foo.bat"),"@echo off\r\necho external-foo\r\n").unwrap();
+    fs::write(&source,"[Common]\nfoo=Write-Output aliasc-foo\n").unwrap();
+    let mut options=options(source,Platform::Windows); options.context.shell=Shell::Pwsh;
+    let model=compile_model(&options).unwrap();
+    let generated=backend::generate(&model.context,&model.definitions).unwrap();
+    let output=root.join("aliases.ps1"); fs::write(&output,&generated.primary).unwrap();
+    let path=format!("{};{}",root.display(),std::env::var("PATH").unwrap_or_default());
+    let script=format!(". '{}'; foo; foo.bat",output.display());
+    let result=Command::new("pwsh").arg("-NoProfile").arg("-Command").arg(script).env("PATH",path).output().unwrap();
+    assert!(result.status.success(),"{}",String::from_utf8_lossy(&result.stderr));
+    assert_eq!(String::from_utf8_lossy(&result.stdout),"aliasc-foo\nexternal-foo\n");
 }
 
 #[test]

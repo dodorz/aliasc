@@ -41,6 +41,16 @@ jobs:
           zsh -n .ci/zsh.sh
           fish --no-execute .ci/fish.fish
 
+          mkdir -p .ci/bin
+          printf '#!/bin/sh\necho external hello\n' > .ci/bin/hello
+          chmod +x .ci/bin/hello
+          export PATH="$PWD/.ci/bin:$PATH"
+          expected=$(printf 'hello\nexternal hello\nexternal hello')
+          test "$(bash -c 'source .ci/bash.sh; hello; command hello; raw hello')" = "$expected"
+          test "$(dash -c '. .ci/posix.sh; hello; command hello; raw hello')" = "$expected"
+          test "$(zsh -c 'source .ci/zsh.sh; hello; command hello; raw hello')" = "$expected"
+          test "$(fish -c 'source .ci/fish.fish; hello; command hello; raw hello')" = "$expected"
+
   windows-shells:
     runs-on: windows-latest
     steps:
