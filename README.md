@@ -48,6 +48,8 @@ aliasc search --shell cmd --platform windows --source C:\\path\\to\\alias proxy
 aliasc explain --shell cmd --platform windows --source C:\\path\\to\\alias pkg
 ```
 
+`aliasc list` prints one definition name per line. Add `--format tsv` to emit `name<TAB>body`, where `body` is the single-line `display_body()` form used by the generated `alias-search` builtin. Fields escape backslash, tab, LF, and CR as `\\`, `\t`, `\n`, and `\r`. The default remains name-only for backward compatibility.
+
 Supported `--shell` values are:
 
 ```text
