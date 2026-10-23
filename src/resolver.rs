@@ -12,7 +12,16 @@ pub fn resolve(options:&CompileOptions)->Result<Compilation,Vec<Diagnostic>> {
     let local=source.parent().unwrap_or(Path::new(".")).join("alias.local");
     if options.local { if !st.local_seen { visit(&mut st,&local,&mut Vec::new(),true,None); } else { track(&mut st,&local,true); } }
     let shortcut=options.shortcut_map.clone();
-    if let Some(path)=&shortcut { add_shortcuts(&mut st,path); }
+    if let Some(path)=&shortcut {
+        let shortcuts=crate::shortcut::load(path,options);
+        for dependency in &shortcuts.dependencies { track(&mut st,dependency,false); }
+        st.diagnostics.extend(shortcuts.diagnostics);
+        if !shortcuts.definitions.is_empty() {
+            let mut raw=shortcuts.definitions;
+            raw.append(&mut st.raw);
+            st.raw=raw;
+        }
+    }
     let mut resolved:Vec<Definition>=Vec::new(); let mut positions=HashMap::new();
     for raw in st.raw {
         let active=raw.local || raw.section.as_ref().is_some_and(|s|st.options.context.section_active(s)); if !active {continue}
@@ -40,112 +49,3 @@ fn resolve_include(parent:&Path,include:&str)->PathBuf{let p=PathBuf::from(inclu
 fn absolute(path:&Path)->PathBuf{if path.is_absolute(){path.to_path_buf()}else{std::env::current_dir().unwrap_or_else(|_|PathBuf::from(".")).join(path)}}
 fn track(st:&mut State<'_>,path:&Path,local:bool){let p=absolute(path);let md=fs::metadata(&p).ok();let mtime_ns=md.as_ref().and_then(|m|m.modified().ok()).and_then(|t|t.duration_since(UNIX_EPOCH).ok()).map(|d|d.as_nanos());let exists=if local{md.is_some()}else{true};st.tracked.push(TrackedInput{path:p,exists,mtime_ns,size:md.map(|m|m.len())});}
 fn dedup_tracked(items:Vec<TrackedInput>)->Vec<TrackedInput>{let mut out=Vec::new();for x in items{if !out.iter().any(|y:&TrackedInput|y.path==x.path){out.push(x)}}out}
-fn normalize_shortcut_yaml(text:&str)->String { text.lines().map(|line| { let Some(colon)=line.find(':') else { return line.to_string() }; let (prefix,value)=line.split_at(colon+1); let value=value.trim(); if value.starts_with('%') && !value.starts_with("'%") && !value.starts_with("\"%") { format!("{} '{}'",prefix,value.replace('\'',"''")) } else { line.to_string() } }).collect::<Vec<_>>().join("\n") }
-fn add_shortcuts(st:&mut State<'_>,path:&Path){
-    track(st,path,false);
-    let Ok(text)=fs::read_to_string(path)else{return};
-    let normalized=normalize_shortcut_yaml(&text);
-    let value:serde_yaml::Value=match serde_yaml::from_str(&normalized){
-        Ok(v)=>v,
-        Err(e)=>{
-            st.diagnostics.push(Diagnostic::error(
-                SourceSpan{file:path.to_path_buf(),line:e.location().map(|x|x.line()).unwrap_or(1),column:e.location().map(|x|x.column()).unwrap_or(1)},
-                format!("invalid ShortcutMap YAML: {e}"),
-                Vec::new()
-            ));
-            return
-        }
-    };
-    let Some(root)=value.as_mapping()else{
-        st.diagnostics.push(Diagnostic::error(
-            SourceSpan{file:path.to_path_buf(),line:1,column:1},
-            "ShortcutMap root must be a mapping",
-            Vec::new()
-        ));
-        return
-    };
-    // Config group: Config.<Name> -> Edit<Name>Config using ${EDITOR}
-    if let Some(config)=root.get(&serde_yaml::Value::String("Config".into())){
-        if let Some(map)=config.as_mapping(){
-            for(k,v) in map{
-                let(Some(n),Some(p))=(k.as_str(),v.as_str())else{
-                    st.diagnostics.push(Diagnostic::error(
-                        SourceSpan{file:path.to_path_buf(),line:1,column:1},
-                        "ShortcutMap Config entries must be strings",
-                        Vec::new()
-                    ));
-                    continue
-                };
-                let name=format!("Edit{}Config",n);
-                let span=SourceSpan{file:path.to_path_buf(),line:1,column:1};
-                match dsl::parse_template(&format!("${{EDITOR}} \"{p}\""),&span,&[]){
-                    Ok(_)=>st.raw.insert(0,RawDefinition{
-                        name,
-                        body:format!("${{EDITOR}} \"{p}\""),
-                        section:Some("Common".into()),
-                        span,
-                        include_stack:Vec::new(),
-                        local:false
-                    }),
-                    Err(_)=>{}
-                }
-            }
-        }
-    }
-    // History group: History.<Name> -> Edit<Name>History using ${EDITOR}
-    if let Some(history)=root.get(&serde_yaml::Value::String("History".into())){
-        if let Some(map)=history.as_mapping(){
-            for(k,v) in map{
-                let(Some(n),Some(p))=(k.as_str(),v.as_str())else{
-                    st.diagnostics.push(Diagnostic::error(
-                        SourceSpan{file:path.to_path_buf(),line:1,column:1},
-                        "ShortcutMap History entries must be strings",
-                        Vec::new()
-                    ));
-                    continue
-                };
-                let name=format!("Edit{}History",n);
-                let span=SourceSpan{file:path.to_path_buf(),line:1,column:1};
-                match dsl::parse_template(&format!("${{EDITOR}} \"{p}\""),&span,&[]){
-                    Ok(_)=>st.raw.insert(0,RawDefinition{
-                        name,
-                        body:format!("${{EDITOR}} \"{p}\""),
-                        section:Some("Common".into()),
-                        span,
-                        include_stack:Vec::new(),
-                        local:false
-                    }),
-                    Err(_)=>{}
-                }
-            }
-        }
-    }
-    // Log group: Log.<Name> -> View<Name>Log using ${LOGVIEWER}
-    if let Some(log)=root.get(&serde_yaml::Value::String("Log".into())){
-        if let Some(map)=log.as_mapping(){
-            for(k,v) in map{
-                let(Some(n),Some(p))=(k.as_str(),v.as_str())else{
-                    st.diagnostics.push(Diagnostic::error(
-                        SourceSpan{file:path.to_path_buf(),line:1,column:1},
-                        "ShortcutMap Log entries must be strings",
-                        Vec::new()
-                    ));
-                    continue
-                };
-                let name=format!("View{}Log",n);
-                let span=SourceSpan{file:path.to_path_buf(),line:1,column:1};
-                match dsl::parse_template(&format!("${{LOGVIEWER}} \"{p}\""),&span,&[]){
-                    Ok(_)=>st.raw.insert(0,RawDefinition{
-                        name,
-                        body:format!("${{LOGVIEWER}} \"{p}\""),
-                        section:Some("Common".into()),
-                        span,
-                        include_stack:Vec::new(),
-                        local:false
-                    }),
-                    Err(_)=>{}
-                }
-            }
-        }
-    }
-}

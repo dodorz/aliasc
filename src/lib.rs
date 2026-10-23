@@ -3,6 +3,7 @@ pub mod context;
 pub mod dsl;
 pub mod manifest;
 pub mod resolver;
+pub mod shortcut;
 
 use std::path::{Path, PathBuf};
 

@@ -504,6 +504,49 @@ fn cmd_outputs_use_crlf_line_endings() {
 }
 
 #[test]
+fn shortcut_map_expands_path_verbs_and_generic_aliases() {
+    let d=tempdir().unwrap(); let source=d.path().join("alias"); let shortcut=d.path().join("ShortcutMap.yaml");
+    fs::write(&source,"[Common]\nplain=printf plain\n").unwrap();
+    fs::write(&shortcut,"Config:\n  Foo: /tmp/foo\nHistory:\n  Bash: /tmp/history\nLog:\n  App: /tmp/app.log\naliases:\n  Custom: printf custom\n").unwrap();
+    let shortcut_path=shortcut.clone();
+    let mut o=options(source,Platform::Linux); o.shortcut_map=Some(shortcut);
+    let model=compile_model(&o).unwrap();
+    assert!(model.tracked_inputs.iter().any(|input|input.path==shortcut_path));
+    let names=model.definitions.iter().map(|definition|definition.name.as_str()).collect::<Vec<_>>();
+    assert!(names.contains(&"EditFooConfig"));
+    assert!(names.contains(&"EditBashHistory"));
+    assert!(names.contains(&"ViewAppLog"));
+    assert!(names.contains(&"Custom"));
+    let edit=model.definitions.iter().find(|definition|definition.name=="EditFooConfig").unwrap();
+    assert_eq!(edit.body,"${EDITOR} \"/tmp/foo\"");
+    let custom=model.definitions.iter().find(|definition|definition.name=="Custom").unwrap();
+    assert_eq!(custom.body,"printf custom");
+    assert!(model.diagnostics.is_empty());
+}
+
+#[test]
+fn alias_source_overrides_shortcut_map_definitions() {
+    let d=tempdir().unwrap(); let source=d.path().join("alias"); let shortcut=d.path().join("ShortcutMap.yaml");
+    fs::write(&source,"[Common]\nEditFooConfig=printf override\n").unwrap();
+    fs::write(&shortcut,"Config:\n  Foo: /tmp/foo\n").unwrap();
+    let mut o=options(source,Platform::Linux); o.shortcut_map=Some(shortcut);
+    let model=compile_model(&o).unwrap();
+    let edit=model.definitions.iter().find(|definition|definition.name=="EditFooConfig").unwrap();
+    assert_eq!(edit.body,"printf override");
+}
+
+#[test]
+fn shortcut_map_reports_invalid_entries_and_unknown_sections() {
+    let d=tempdir().unwrap(); let source=d.path().join("alias"); let shortcut=d.path().join("ShortcutMap.yaml");
+    fs::write(&source,"[Common]\nplain=printf plain\n").unwrap();
+    fs::write(&shortcut,"Config:\n  Foo: 42\nUnknown:\n  Bar: baz\n").unwrap();
+    let mut o=options(source,Platform::Linux); o.shortcut_map=Some(shortcut);
+    let model=compile_model(&o).unwrap();
+    assert!(model.diagnostics.iter().any(|diagnostic|diagnostic.message.contains("ShortcutMap Config entries must be strings")));
+    assert!(model.diagnostics.iter().any(|diagnostic|diagnostic.message.contains("unknown ShortcutMap section `Unknown`")));
+}
+
+#[test]
 fn manifest_tracks_missing_optional_inputs_and_all_outputs() {
     let d=tempdir().unwrap(); let source=d.path().join("alias"); let output=d.path().join("aliases.mac");
     fs::write(&source,"[Common]\nx=printf x\n").unwrap();

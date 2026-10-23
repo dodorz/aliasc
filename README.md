@@ -87,7 +87,7 @@ The `\` prefix inside an alias body (`cat=\cat -n`) means something different: i
 - `include "path"` is expanded relative to the including file.
 - Missing ordinary includes produce warnings; include cycles are errors.
 - `alias.local` beside the main source is loaded automatically after the main include tree unless `--no-local` is supplied.
-- `ShortcutMap.yaml` beside the source is read by default unless `--no-shortcut-map` is supplied.
+- `ShortcutMap.yaml` is read from `$HOME/.config/ShortcutMap.yaml` by default unless `--shortcut-map` supplies another path or `--no-shortcut-map` disables it.
 - Section activation depends on platform, distro, and environment, not on `--shell`.
 - Alias definition names are case-insensitive when definitions are resolved, but generated entry points are intentionally limited for compactness. A definition such as `PiWeb=...` can be invoked as `PiWeb` or `piweb`; mixed-case variants such as `Piweb` are not generated on case-sensitive shells.
 - Definitions may span multiple lines while parentheses are unbalanced. This is mostly useful for listing one `FirstAvailable` candidate per line:
@@ -106,6 +106,38 @@ The `\` prefix inside an alias body (`cat=\cat -n`) means something different: i
 
 Every successful compilation writes a manifest containing the resolved target context, tracked inputs, generated outputs, and content hashes.
 
+## ShortcutMap
+
+`ShortcutMap.yaml` is an optional compile-time definition source, not a runtime mechanism. It is expanded into ordinary alias definitions before section selection and duplicate resolution. Definitions in the main alias source and `alias.local` therefore override generated ShortcutMap definitions with the same name.
+
+Built-in sections:
+
+```yaml
+Config:
+  Foo: ~/.foo
+
+History:
+  Bash: ~/.bash_history
+
+Log:
+  App: /var/log/app.log
+```
+
+They expand to `EditFooConfig`, `EditBashHistory`, and `ViewAppLog`, using `${EDITOR}` or `${LOGVIEWER}`. ShortcutMap values are treated as data and quoted before being inserted into the DSL.
+
+The generic section provides an escape hatch for definitions that do not fit a built-in verb:
+
+```yaml
+Config:
+  Foo: ~/.foo
+aliases:
+  Custom: printf custom
+```
+
+Unknown sections produce warnings instead of being silently ignored.
+
+Architecturally, `ShortcutMap` is an input adapter: `src/shortcut.rs` parses YAML, dispatches each top-level key to a `ShortcutHandler`, and returns `RawDefinition` values plus diagnostics and tracked dependencies. The resolver only merges definitions and never needs to know what a section such as `Config` or a future `Forward` means. New verbs are added by implementing a handler rather than changing the resolver.
+
 ## Rebuild Helpers
 
 The repository provides PowerShell helpers for manifest-based stale checks and explicit recompilation:
@@ -120,7 +152,7 @@ Interactive profiles should source or install only the last successful generated
 ## Repository Layout
 
 ```text
-src/          Compiler, resolver, IR, backend, and manifest implementation
+src/          Compiler, resolver, IR, backend, ShortcutMap adapter, and manifest implementation
 tests/        Fixture-driven integration tests
 fixtures/     Small DSL source fixtures
 scripts/      Manifest status and explicit rebuild helpers
