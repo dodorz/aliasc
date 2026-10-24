@@ -547,6 +547,32 @@ fn shortcut_map_reports_invalid_entries_and_unknown_sections() {
 }
 
 #[test]
+fn forward_compiles_ssh_config_hosts_and_tracks_dependencies() {
+    let d=tempdir().unwrap(); let source=d.path().join("alias"); let shortcut=d.path().join("ShortcutMap.yaml"); let ssh=d.path().join("ssh_config"); let output=d.path().join("aliases.sh");
+    fs::write(&source,"[Common]\nplain=printf plain\n").unwrap();
+    fs::write(&shortcut,"Forward:\n  exclude_users: [git]\n  apps:\n    Syncthing: 8384\n").unwrap();
+    fs::write(&ssh,"Host *\nHost mac\nHost ecs\nHost github.com\n    User git\n").unwrap();
+    let result=std::process::Command::new(env!("CARGO_BIN_EXE_aliasc"))
+        .args(["compile","--shell","posix","--platform","linux","--source"])
+        .arg(&source)
+        .arg("--shortcut-map").arg(&shortcut)
+        .arg("--no-local")
+        .arg("--output").arg(&output)
+        .env("ALIASC_SSH_CONFIG",&ssh)
+        .output()
+        .unwrap();
+    assert!(result.status.success(),"{}",String::from_utf8_lossy(&result.stderr));
+    let generated=fs::read_to_string(&output).unwrap();
+    assert!(generated.contains("ForwardMacSyncthing() {"));
+    assert!(generated.contains("'ExitOnForwardFailure=yes' '-L' '8384:127.0.0.1:8384' 'mac'"));
+    assert!(generated.contains("ForwardEcsSyncthing() {"));
+    assert!(generated.contains("'ExitOnForwardFailure=yes' '-L' '8384:127.0.0.1:8384' 'ecs'"));
+    assert!(!generated.contains("ForwardGithubComSyncthing"));
+    let manifest=fs::read_to_string(format!("{}.manifest.json",output.display())).unwrap();
+    assert!(manifest.contains(&ssh.display().to_string()));
+}
+
+#[test]
 fn manifest_tracks_missing_optional_inputs_and_all_outputs() {
     let d=tempdir().unwrap(); let source=d.path().join("alias"); let output=d.path().join("aliases.mac");
     fs::write(&source,"[Common]\nx=printf x\n").unwrap();

@@ -4,6 +4,7 @@ pub mod dsl;
 pub mod manifest;
 pub mod resolver;
 pub mod shortcut;
+pub mod ssh_config;
 
 use std::path::{Path, PathBuf};
 

@@ -136,7 +136,46 @@ aliases:
 
 Unknown sections produce warnings instead of being silently ignored.
 
-Architecturally, `ShortcutMap` is an input adapter: `src/shortcut.rs` parses YAML, dispatches each top-level key to a `ShortcutHandler`, and returns `RawDefinition` values plus diagnostics and tracked dependencies. The resolver only merges definitions and never needs to know what a section such as `Config` or a future `Forward` means. New verbs are added by implementing a handler rather than changing the resolver.
+### Forward
+
+`Forward` reads concrete `Host` aliases from `~/.ssh/config` (override with `ALIASC_SSH_CONFIG`) and expands each app into a host-specific alias:
+
+```yaml
+Forward:
+  Syncthing: 8384
+```
+
+With `Host mac`, this generates `ForwardMacSyncthing`, whose body is effectively:
+
+```sh
+ssh -N -o ExitOnForwardFailure=yes -L 8384:127.0.0.1:8384 mac
+```
+
+The command still runs `ssh mac`, so `HostName`, `User`, `Port`, `ProxyJump`, and other SSH options are resolved by SSH at runtime. `Host *`, wildcard patterns, and negated patterns are skipped. `Include` files are expanded and tracked as dependencies.
+
+`port` (or `remote_port`) is the remote target port. `local_port` is the local listening port and defaults to the remote port. `remote_host` defaults to `127.0.0.1`, and `bind` is the local bind address, also defaulting to `127.0.0.1`.
+
+To restrict hosts or control the alias fragment:
+
+```yaml
+Forward:
+  hosts:
+    mac: Mac
+    ecs: ECS
+  exclude_hosts: ["github.com"]
+  exclude_users: [git]
+  apps:
+    Syncthing: 8384
+    Jellyfin:
+      remote_port: 8096
+      local_port: 18096
+      bind: 0.0.0.0
+      remote_host: 192.168.1.10
+```
+
+`hosts` may also be a list of SSH host names. `exclude_hosts` supports `*` and `?` patterns. `exclude_users` filters hosts by their effective SSH `User`, using the first matching `Host` rule in configuration order.
+
+Architecturally, `ShortcutMap` is an input adapter: `src/shortcut.rs` parses YAML, dispatches each top-level key to a `ShortcutHandler`, and returns `RawDefinition` values plus diagnostics and tracked dependencies. The resolver only merges definitions and never needs to know what a section such as `Config` or `Forward` means. New verbs are added by implementing a handler rather than changing the resolver.
 
 ## Rebuild Helpers
 
@@ -152,7 +191,7 @@ Interactive profiles should source or install only the last successful generated
 ## Repository Layout
 
 ```text
-src/          Compiler, resolver, IR, backend, ShortcutMap adapter, and manifest implementation
+src/          Compiler, resolver, IR, backend, ShortcutMap adapter, SSH config reader, and manifest implementation
 tests/        Fixture-driven integration tests
 fixtures/     Small DSL source fixtures
 scripts/      Manifest status and explicit rebuild helpers
