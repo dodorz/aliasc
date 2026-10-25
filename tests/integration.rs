@@ -53,6 +53,27 @@ fn posix_fallback_supports_multiline_definitions() {
     assert!(result.status.success());
 }
 
+#[cfg(unix)]
+#[test]
+fn unix_downloader_falls_back_from_curl_to_wget() {
+    use std::{os::unix::fs::PermissionsExt, process::Command};
+    let d=tempdir().unwrap(); let root=d.path();
+    let tools=root.join("bin"); fs::create_dir_all(&tools).unwrap();
+    let log=root.join("tools.log");
+    fs::write(tools.join("curl"),format!("#!/bin/sh\nprintf 'curl\\n' >> '{}'\nexit 28\n",log.display())).unwrap();
+    fs::write(tools.join("wget"),format!("#!/bin/sh\nout=\nurl=\nwhile [ \"$#\" -gt 0 ]; do case \"$1\" in -O) out=$2; shift 2 ;; -*) shift ;; *) url=$1; shift ;; esac; done\nprintf 'wget %s\\n' \"$url\" >> '{}'\nprintf '#!/bin/sh\\n' > \"$out\"\n",log.display())).unwrap();
+    for tool in ["curl","wget"] { fs::set_permissions(tools.join(tool),fs::Permissions::from_mode(0o755)).unwrap(); }
+    let cache=root.join("cache");
+    let script=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("aliasc.sh");
+    let path=format!("{}:{}",tools.display(),std::env::var("PATH").unwrap_or_default());
+    let result=Command::new("sh").arg(&script).args(["--platform","linux-x86_64-musl","--print-binary-path"]).env("PATH",path).env("ALIASC_BINARY_CACHE_DIR",&cache).output().unwrap();
+    assert!(result.status.success(),"{}",String::from_utf8_lossy(&result.stderr));
+    assert_eq!(String::from_utf8_lossy(&result.stdout).trim(),cache.join("aliasc-x86_64-unknown-linux-musl").display().to_string());
+    let log=fs::read_to_string(&log).unwrap();
+    assert!(log.contains("curl"),"{log}");
+    assert!(log.contains("wget https://github.com/dodorz/aliasc/releases/latest/download/aliasc-x86_64-unknown-linux-musl"),"{log}");
+}
+
 #[test]
 fn first_available_same_named_candidate_is_case_insensitive() {
     let d=tempdir().unwrap(); let source=d.path().join("alias");

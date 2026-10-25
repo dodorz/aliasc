@@ -63,13 +63,29 @@ __aliasc_download() {
     _url="https://github.com/$repo/releases/$release/download/$_asset"
     _tmp=$(mktemp "$cache_root/.${_asset}.tmp.XXXXXX") || fail "cannot create download temporary file"
     trap 'rm -f "$_tmp"' EXIT HUP INT TERM
+    _downloaded=0
     if command -v curl >/dev/null 2>&1; then
-        curl --fail --location --silent --show-error --retry 2 --connect-timeout 10 --max-time 45 --output "$_tmp" "$_url" || fail "download failed: $_url"
-    elif command -v wget >/dev/null 2>&1; then
-        wget -q --timeout=15 --tries=2 -O "$_tmp" "$_url" || fail "download failed: $_url"
-    else
-        fail "curl or wget is required to download $_asset"
+        if curl --fail --location --silent --show-error \
+            --retry 1 --retry-delay 1 --connect-timeout 10 --max-time 600 \
+            --speed-limit 512 --speed-time 60 \
+            --output "$_tmp" "$_url"; then
+            _downloaded=1
+        elif command -v wget >/dev/null 2>&1; then
+            printf '%s\n' 'aliasc: curl failed; retrying with wget' >&2
+        fi
     fi
+    if [ "$_downloaded" -eq 0 ] && command -v wget >/dev/null 2>&1; then
+        if wget -q --timeout=20 --tries=2 -O "$_tmp" "$_url"; then
+            _downloaded=1
+        fi
+    fi
+    if [ "$_downloaded" -eq 0 ]; then
+        if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+            fail "curl or wget is required to download $_asset"
+        fi
+        fail "download failed: $_url"
+    fi
+    [ -s "$_tmp" ] || fail "downloaded file is empty: $_url"
     chmod 0755 "$_tmp" || fail "cannot mark downloaded binary executable: $_tmp"
     mv -f "$_tmp" "$cache_root/$_asset" || fail "cannot install downloaded binary: $cache_root/$_asset"
     trap - EXIT HUP INT TERM
