@@ -35,6 +35,24 @@ fn posix_alias_name_and_lowercase_variant_execute_the_same_definition() {
     assert!(result.status.success(),"{}",String::from_utf8_lossy(&result.stderr));
     assert_eq!(String::from_utf8_lossy(&result.stdout),"ok\nok\n");
 }
+#[cfg(unix)]
+#[test]
+fn posix_fallback_supports_multiline_definitions() {
+    use std::{os::unix::fs::PermissionsExt, process::{Command,Stdio}};
+    let d=tempdir().unwrap(); let root=d.path();
+    let downloader=root.join(".local/bin/aliasc.sh");
+    fs::create_dir_all(downloader.parent().unwrap()).unwrap();
+    fs::write(&downloader,"#!/bin/sh\nexit 1\n").unwrap();
+    fs::set_permissions(&downloader,fs::Permissions::from_mode(0o755)).unwrap();
+    let source=root.join("alias");
+    fs::write(&source,"[Common]\ncat=FirstAvailable(\nno-such-aliasc-candidate\necho\n)\nfly=WithEnv(\nHTTPS_PROXY=http://127.0.0.1:7890\nHTTP_PROXY=http://127.0.0.1:7890\n) printf '%s %s\\n' ${HTTPS_PROXY} ${HTTP_PROXY}\nsetv=SetEnv(\nALPHA=one\nBETA=\"two three\"\n)\nclean=UnsetEnv(\nALPHA\nBETA\n)\n").unwrap();
+    let loader=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("alias.sh");
+    let script=format!(". '{}'\ncat hello\nfly\nsetv\nprintf '[%s][%s]\\n' \"${{ALPHA-}}\" \"${{BETA-}}\"\nclean\nprintf '[%s][%s]\\n' \"${{ALPHA-}}\" \"${{BETA-}}\"\n",loader.display());
+    let result=Command::new("sh").arg("-c").arg(&script).env("HOME",root).env("ALIAS_FILE",&source).stdin(Stdio::null()).output().unwrap();
+    assert_eq!(String::from_utf8_lossy(&result.stdout),"hello\nhttp://127.0.0.1:7890 http://127.0.0.1:7890\n[one][two three]\n[][]\n","{}",String::from_utf8_lossy(&result.stderr));
+    assert!(result.status.success());
+}
+
 #[test]
 fn first_available_same_named_candidate_is_case_insensitive() {
     let d=tempdir().unwrap(); let source=d.path().join("alias");
@@ -709,6 +727,21 @@ fn multiline_setenv_unsetenv_and_withenv_parse() {
     let run=model.definitions.iter().find(|d|d.name=="run").unwrap();
     let Template::WithEnv{vars,body}=&run.template else { panic!("expected WithEnv") };
     assert_eq!(vars,&vec![("HELLO".to_string(),"temporary".to_string())]);
+    assert!(body.is_some());
+}
+
+#[test]
+fn multiline_definitions_ignore_comments_on_the_opening_line() {
+    let d=tempdir().unwrap(); let source=d.path().join("alias");
+    fs::write(&source,"[Common]\ncat=FirstAvailable( # preferred first\nbatcat\nbat # also fine\n)\nrun=WithEnv( # temporary vars\nHELLO=world\n) printf ${HELLO}\n").unwrap();
+    let model=compile_model(&options(source,Platform::Linux)).unwrap();
+    assert!(model.diagnostics.is_empty(),"{:?}",model.diagnostics);
+    let cat=model.definitions.iter().find(|d|d.name=="cat").unwrap();
+    let Template::FirstAvailable(candidates)=&cat.template else { panic!("expected FirstAvailable") };
+    assert_eq!(candidates.iter().map(first_argument_literal).collect::<Vec<_>>(),vec!["batcat","bat"]);
+    let run=model.definitions.iter().find(|d|d.name=="run").unwrap();
+    let Template::WithEnv{vars,body}=&run.template else { panic!("expected WithEnv") };
+    assert_eq!(vars,&vec![("HELLO".to_string(),"world".to_string())]);
     assert!(body.is_some());
 }
 

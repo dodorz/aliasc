@@ -100,7 +100,7 @@ The `\` prefix inside an alias body (`cat=\cat -n`) means something different: i
   )
   ```
 
-  `SetEnv(...)`, `UnsetEnv(...)`, and `WithEnv(...)` entries may be listed the same way, and comma and newline separators can be mixed. Inside a multi-line definition, blank lines and lines starting with `#` or `;` are ignored. A definition that reaches the end of the file with an unclosed `(` is an error.
+  `SetEnv(...)`, `UnsetEnv(...)`, and `WithEnv(...)` entries may be listed the same way, and comma and newline separators can be mixed. Inside a multi-line definition, blank lines and lines starting with `#` or `;` are ignored, and an inline `#` comment may also follow the opening parenthesis or a candidate. A definition that reaches the end of the file with an unclosed `(` is an error. The POSIX shell fallback in `alias.sh` parses the same multi-line forms for `FirstAvailable`, `SetEnv`, `UnsetEnv`, and `WithEnv`, so behavior does not depend on whether the compiler binary is available.
 - `?(...)` is a shorthand for `FirstAvailable(...)`: `cat=?(batcat, bat, cat)` is equivalent to `cat=FirstAvailable(batcat, bat, cat)`. A `?` anywhere other than immediately before the opening parenthesis at the start of a definition body is a literal character.
 - `[Windows]` is the v1 legacy cmd-template compatibility section; portable `SetEnv(...)`, `UnsetEnv(...)`, and `WithEnv(...)` templates are still parsed there. Shell-specific sections are reserved and inactive in v1.
 
