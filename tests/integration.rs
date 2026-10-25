@@ -283,7 +283,9 @@ fn exe_suffix_bypasses_generated_alias_body_on_powershell() {
     let script=format!(". '{}'; foo; foo.bat",output.display());
     let result=Command::new("pwsh").arg("-NoProfile").arg("-Command").arg(script).env("PATH",path).output().unwrap();
     assert!(result.status.success(),"{}",String::from_utf8_lossy(&result.stderr));
-    assert_eq!(String::from_utf8_lossy(&result.stdout),"aliasc-foo\nexternal-foo\n");
+    // PowerShell writes CRLF on Windows; compare line content, not line endings.
+    let stdout=String::from_utf8_lossy(&result.stdout).replace("\r\n","\n");
+    assert_eq!(stdout,"aliasc-foo\nexternal-foo\n");
 }
 
 #[test]
@@ -587,7 +589,12 @@ fn forward_compiles_ssh_config_hosts_and_tracks_dependencies() {
     assert!(generated.contains("'ExitOnForwardFailure=yes' '-L' '8384:127.0.0.1:8384' 'ecs'"));
     assert!(!generated.contains("ForwardGithubComSyncthing"));
     let manifest=fs::read_to_string(format!("{}.manifest.json",output.display())).unwrap();
-    assert!(manifest.contains(&ssh.display().to_string()));
+    let manifest: serde_json::Value=serde_json::from_str(&manifest).unwrap();
+    // The tracked input stores the canonical path, which carries a Windows
+    // verbatim prefix and resolves symlinks, so compare canonical forms.
+    let expected=fs::canonicalize(&ssh).unwrap_or_else(|_|ssh.clone());
+    let tracked=manifest["inputs"].as_array().expect("manifest inputs");
+    assert!(tracked.iter().any(|input|input["path"].as_str().and_then(|path|fs::canonicalize(path).ok()).is_some_and(|path|path==expected)),"{}",manifest);
 }
 
 #[test]
