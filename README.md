@@ -125,6 +125,8 @@ Log:
 
 They expand to `EditFooConfig`, `EditBashHistory`, and `ViewAppLog`, using `${EDITOR}` or `${LOGVIEWER}`. ShortcutMap values are treated as data and quoted before being inserted into the DSL.
 
+Values that look like Windows paths keep their backslashes literally, even inside double quotes. For example, `NotepadPlus: "%APPDATA%\Notepad++\config.xml"` works without doubling every backslash. Plain unquoted paths, single-quoted paths, and standard YAML escapes in other double-quoted scalars are left unchanged.
+
 The generic section provides an escape hatch for definitions that do not fit a built-in verb:
 
 ```yaml

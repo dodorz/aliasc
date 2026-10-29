@@ -673,10 +673,13 @@ fn quote_dsl(value: &str) -> String {
     quoted
 }
 
-/// Quote unquoted YAML values starting with `%`.
+/// Make Windows-flavored values survive YAML parsing.
 ///
 /// `%` at the beginning of a YAML scalar is a directive indicator, but values
-/// such as `%USERPROFILE%/.config` are useful on Windows. Only the value after
+/// such as `%USERPROFILE%/.config` are useful on Windows. Likewise, backslashes
+/// inside double-quoted scalars are YAML escape characters, so `"C:\Tools"`
+/// either fails to parse or silently becomes a tab. Rewrite those values as
+/// single-quoted scalars, where backslashes are literal. Only the value after
 /// the first colon is adjusted; the rest of the document is left untouched.
 fn normalize_yaml(text: &str) -> String {
     text.lines()
@@ -690,13 +693,71 @@ fn normalize_yaml(text: &str) -> String {
                 && !value.starts_with("'%")
                 && !value.starts_with("\"%")
             {
-                format!("{} '{}'", prefix, value.replace('\'', "''"))
+                return format!("{} '{}'", prefix, value.replace('\'', "''"));
+            }
+            let Some(content) = double_quoted_scalar(value) else {
+                return line.to_string();
+            };
+            if needs_literal_backslashes(content) || has_invalid_yaml_escape(content) {
+                format!("{} '{}'", prefix, content.replace('\'', "''"))
             } else {
                 line.to_string()
             }
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// Return the content of a double-quoted scalar that occupies the whole value,
+/// optionally followed by a comment.
+fn double_quoted_scalar(value: &str) -> Option<&str> {
+    if !value.starts_with('"') {
+        return None;
+    }
+    let bytes = value.as_bytes();
+    let mut index = 1;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\\' => index += 2,
+            b'"' => {
+                let trailing = value[index + 1..].trim();
+                if trailing.is_empty() || trailing.starts_with('#') {
+                    return Some(&value[1..index]);
+                }
+                return None;
+            }
+            _ => index += 1,
+        }
+    }
+    None
+}
+
+/// Detect values that unambiguously use Windows path syntax.
+fn needs_literal_backslashes(content: &str) -> bool {
+    content.contains('\\')
+        && (content.starts_with('%')
+            || content.starts_with("\\\\")
+            || content.starts_with("~\\")
+            || content.contains(":\\"))
+}
+
+/// Detect double-quoted scalars that YAML cannot parse because they contain a
+/// backslash sequence that is not a defined escape.
+fn has_invalid_yaml_escape(content: &str) -> bool {
+    let mut characters = content.chars();
+    while let Some(character) = characters.next() {
+        if character != '\\' {
+            continue;
+        }
+        match characters.next() {
+            Some(
+                '0' | 'a' | 'b' | 't' | 'n' | 'v' | 'f' | 'r' | 'e' | ' ' | '"' | '/' | '\\'
+                | 'N' | '_' | 'L' | 'P' | 'x' | 'u' | 'U',
+            ) => {}
+            _ => return true,
+        }
+    }
+    false
 }
 
 #[cfg(test)]
@@ -900,5 +961,40 @@ mod tests {
             loaded.definitions[0].body,
             "${EDITOR} \"%USERPROFILE%/.foo\""
         );
+    }
+
+    #[test]
+    fn double_quoted_windows_paths_remain_literal() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("ShortcutMap.yaml");
+        std::fs::write(
+            &path,
+            "Config:\n  Env: \"%APPDATA%\\Notepad++\\config.xml\"\n  Drive: \"C:\\Tools\\Notepad3.ini\"\n",
+        )
+        .unwrap();
+        let loaded = load(&path, &options(directory.path().join("alias")));
+        assert!(loaded.diagnostics.is_empty(), "{:?}", loaded.diagnostics);
+        let env = loaded
+            .definitions
+            .iter()
+            .find(|definition| definition.name == "EditEnvConfig")
+            .unwrap();
+        assert_eq!(env.body, r#"${EDITOR} "%APPDATA%\\Notepad++\\config.xml""#);
+        let drive = loaded
+            .definitions
+            .iter()
+            .find(|definition| definition.name == "EditDriveConfig")
+            .unwrap();
+        assert_eq!(drive.body, r#"${EDITOR} "C:\\Tools\\Notepad3.ini""#);
+    }
+
+    #[test]
+    fn valid_yaml_escapes_are_preserved() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("ShortcutMap.yaml");
+        std::fs::write(&path, "aliases:\n  Escaped: \"printf line\\nnext\"\n").unwrap();
+        let loaded = load(&path, &options(directory.path().join("alias")));
+        assert_eq!(loaded.definitions.len(), 1);
+        assert_eq!(loaded.definitions[0].body, "printf line\nnext");
     }
 }
