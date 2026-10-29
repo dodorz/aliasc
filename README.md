@@ -87,7 +87,7 @@ The `\` prefix inside an alias body (`cat=\cat -n`) means something different: i
 - `include "path"` is expanded relative to the including file.
 - Missing ordinary includes produce warnings; include cycles are errors.
 - `alias.local` beside the main source is loaded automatically after the main include tree unless `--no-local` is supplied.
-- `ShortcutMap.yaml` is read from `$HOME/.config/ShortcutMap.yaml` by default unless `--shortcut-map` supplies another path or `--no-shortcut-map` disables it.
+- `ShortcutMap.yaml` is read from `$HOME/.config/ShortcutMap.yaml` by default; when that file does not exist, a `ShortcutMap.yaml` beside the alias source is used instead, unless `--shortcut-map` supplies another path or `--no-shortcut-map` disables it.
 - Section activation depends on platform, distro, and environment, not on `--shell`.
 - Alias definition names are case-insensitive when definitions are resolved, but generated entry points are intentionally limited for compactness. A definition such as `PiWeb=...` can be invoked as `PiWeb` or `piweb`; mixed-case variants such as `Piweb` are not generated on case-sensitive shells.
 - Definitions may span multiple lines while parentheses are unbalanced. This is mostly useful for listing one `FirstAvailable` candidate per line:
