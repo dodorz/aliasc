@@ -46,9 +46,10 @@ fn posix_fallback_supports_multiline_definitions() {
     fs::set_permissions(&fetcher,fs::Permissions::from_mode(0o755)).unwrap();
     let source=root.join("alias");
     fs::write(&source,"[Common]\ncat=FirstAvailable(\nno-such-aliasc-candidate\necho\n)\nfly=WithEnv(\nHTTPS_PROXY=http://127.0.0.1:7890\nHTTP_PROXY=http://127.0.0.1:7890\n) printf '%s %s\\n' ${HTTPS_PROXY} ${HTTP_PROXY}\nsetv=SetEnv(\nALPHA=one\nBETA=\"two three\"\n)\nclean=UnsetEnv(\nALPHA\nBETA\n)\n").unwrap();
-    let activator=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("aliasc-activate.sh");
+    let repo=PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let activator=repo.join("aliasc-activate.sh");
     let script=format!(". '{}'\ncat hello\nfly\nsetv\nprintf '[%s][%s]\\n' \"${{ALPHA-}}\" \"${{BETA-}}\"\nclean\nprintf '[%s][%s]\\n' \"${{ALPHA-}}\" \"${{BETA-}}\"\n",activator.display());
-    let result=Command::new("sh").arg("-c").arg(&script).env("HOME",root).env("ALIAS_FILE",&source).stdin(Stdio::null()).output().unwrap();
+    let result=Command::new("sh").arg("-c").arg(&script).env("HOME",root).env("ALIAS_FILE",&source).env("ALIASC_LIB_DIR",&repo).stdin(Stdio::null()).output().unwrap();
     assert_eq!(String::from_utf8_lossy(&result.stdout),"hello\nhttp://127.0.0.1:7890 http://127.0.0.1:7890\n[one][two three]\n[][]\n","{}",String::from_utf8_lossy(&result.stderr));
     assert!(result.status.success());
 }

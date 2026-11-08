@@ -1,0 +1,371 @@
+#!/bin/sh
+# aliasc-fallback.sh - POSIX-only degraded parser, used when no compiler exists.
+#
+# Responsibility: turn the alias DSL into POSIX shell functions without the Rust
+# compiler. Slow and partial by design - it exists so a broken download never
+# leaves a shell without aliases.
+#
+# This file is POSIX-only ON PURPOSE and must not be "shared" with the other
+# activators. It works by eval-ing POSIX function bodies (`export`, `unset`,
+# `$(...)`); fish needs `set -gx`, nushell needs `$env.X =`, PowerShell needs
+# `$env:X =`. Generating those from here would mean reimplementing the compiler
+# backends in shell. When the compiler is missing, the non-POSIX activators
+# reuse the last good artifact instead.
+#
+# Sourced by aliasc-activate.sh. Provides __aliasc_fallback_load and friends.
+
+__aliasc_fallback_define_first_available() {
+    __aliasc_fallback_name=$1
+    __aliasc_fallback_candidates=$2
+    __aliasc_fallback_cache="__aliasc_first_${__aliasc_fallback_name}"
+    __aliasc_fallback_index=0
+    __aliasc_fallback_resolve=
+    __aliasc_fallback_cases=
+    while [ -n "$__aliasc_fallback_candidates" ]; do
+        case "$__aliasc_fallback_candidates" in
+            *,*)
+                __aliasc_fallback_candidate=${__aliasc_fallback_candidates%%,*}
+                __aliasc_fallback_candidates=${__aliasc_fallback_candidates#*,}
+                ;;
+            *)
+                __aliasc_fallback_candidate=$__aliasc_fallback_candidates
+                __aliasc_fallback_candidates=
+                ;;
+        esac
+        __aliasc_fallback_candidate=$(printf '%s' "$__aliasc_fallback_candidate" | command sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        [ -n "$__aliasc_fallback_candidate" ] || continue
+        case "$__aliasc_fallback_candidate" in
+            \\*) __aliasc_fallback_command=${__aliasc_fallback_candidate#\\} ;;
+            *) __aliasc_fallback_command=$__aliasc_fallback_candidate ;;
+        esac
+        __aliasc_fallback_command_name=${__aliasc_fallback_command%%[[:space:]]*}
+        __aliasc_fallback_command_rest=${__aliasc_fallback_command#"$__aliasc_fallback_command_name"}
+        __aliasc_fallback_index=$((__aliasc_fallback_index + 1))
+        if [ "$__aliasc_fallback_index" -eq 1 ]; then
+            __aliasc_fallback_resolve="${__aliasc_fallback_resolve}    if __aliasc_is_external '$__aliasc_fallback_command_name'; then ${__aliasc_fallback_cache}=1
+"
+        else
+            __aliasc_fallback_resolve="${__aliasc_fallback_resolve}    elif __aliasc_is_external '$__aliasc_fallback_command_name'; then ${__aliasc_fallback_cache}=${__aliasc_fallback_index}
+"
+        fi
+        __aliasc_fallback_cases="${__aliasc_fallback_cases}    ${__aliasc_fallback_index}) command ${__aliasc_fallback_command_name}${__aliasc_fallback_command_rest} \"\$@\"
+       return \$? ;;
+"
+    done
+    if [ "$__aliasc_fallback_index" -eq 0 ]; then
+        eval "${__aliasc_fallback_name}() {
+    printf '%s\\n' 'aliasc: no FirstAvailable candidate found' >&2
+    return 127
+}"
+        return
+    fi
+    __aliasc_fallback_code=$(
+        printf '%s\n' "${__aliasc_fallback_name}() {"
+        printf '%s\n' "  if [ \"\${${__aliasc_fallback_cache}+x}\" != x ] || [ \"\${${__aliasc_fallback_cache}-}\" = none ]; then"
+        printf '%s' "$__aliasc_fallback_resolve"
+        printf '%s\n' "    else ${__aliasc_fallback_cache}=none"
+        printf '%s\n' "    fi"
+        printf '%s\n' "  fi"
+        printf '%s\n' "  case \"\$${__aliasc_fallback_cache}\" in"
+        printf '%s' "$__aliasc_fallback_cases"
+        printf '%s\n' "    *) printf '%s\\n' 'aliasc: no FirstAvailable candidate found' >&2"
+        printf '%s\n' "       return 127 ;;"
+        printf '%s\n' "  esac"
+        printf '%s\n' "}"
+    )
+    eval "$__aliasc_fallback_code"
+}
+
+__aliasc_fallback_define_error() {
+    __aliasc_fallback_errmsg=$1
+    eval "${__aliasc_fallback_name}() {
+    printf '%s\\n' 'aliasc: ${__aliasc_fallback_name}: ${__aliasc_fallback_errmsg}' >&2
+    return 127
+}"
+}
+
+# Strip an inline comment from a single line without touching quoted text.
+__aliasc_fallback_strip_comment() {
+    __aliasc_fallback_sc_out=
+    __aliasc_fallback_sc_q=
+    __aliasc_fallback_sc_s=$1
+    while [ -n "$__aliasc_fallback_sc_s" ]; do
+        __aliasc_fallback_sc_c=${__aliasc_fallback_sc_s%"${__aliasc_fallback_sc_s#?}"}
+        __aliasc_fallback_sc_s=${__aliasc_fallback_sc_s#?}
+        if [ -n "$__aliasc_fallback_sc_q" ]; then
+            [ "$__aliasc_fallback_sc_c" = "$__aliasc_fallback_sc_q" ] && __aliasc_fallback_sc_q=
+            __aliasc_fallback_sc_out="$__aliasc_fallback_sc_out$__aliasc_fallback_sc_c"
+        elif [ "$__aliasc_fallback_sc_c" = "'" ] || [ "$__aliasc_fallback_sc_c" = '"' ]; then
+            __aliasc_fallback_sc_q=$__aliasc_fallback_sc_c
+            __aliasc_fallback_sc_out="$__aliasc_fallback_sc_out$__aliasc_fallback_sc_c"
+        elif [ "$__aliasc_fallback_sc_c" = '#' ]; then
+            break
+        else
+            __aliasc_fallback_sc_out="$__aliasc_fallback_sc_out$__aliasc_fallback_sc_c"
+        fi
+    done
+    printf '%s' "$__aliasc_fallback_sc_out"
+}
+
+# Set __aliasc_fallback_pd_delta to the parenthesis depth change of one line,
+# ignoring parentheses inside quotes (matching the compiler's parser).
+__aliasc_fallback_paren_delta() {
+    __aliasc_fallback_pd_delta=0
+    case "$1" in
+        *'('*|*')'*)
+            __aliasc_fallback_pd_q=
+            __aliasc_fallback_pd_s=$1
+            while [ -n "$__aliasc_fallback_pd_s" ]; do
+                __aliasc_fallback_pd_c=${__aliasc_fallback_pd_s%"${__aliasc_fallback_pd_s#?}"}
+                __aliasc_fallback_pd_s=${__aliasc_fallback_pd_s#?}
+                if [ -n "$__aliasc_fallback_pd_q" ]; then
+                    [ "$__aliasc_fallback_pd_c" = "$__aliasc_fallback_pd_q" ] && __aliasc_fallback_pd_q=
+                elif [ "$__aliasc_fallback_pd_c" = "'" ] || [ "$__aliasc_fallback_pd_c" = '"' ]; then
+                    __aliasc_fallback_pd_q=$__aliasc_fallback_pd_c
+                elif [ "$__aliasc_fallback_pd_c" = '(' ]; then
+                    __aliasc_fallback_pd_delta=$((__aliasc_fallback_pd_delta + 1))
+                elif [ "$__aliasc_fallback_pd_c" = ')' ]; then
+                    __aliasc_fallback_pd_delta=$((__aliasc_fallback_pd_delta - 1))
+                fi
+            done
+            ;;
+    esac
+}
+
+# Split what follows WithEnv's opening parenthesis into assignments and body.
+__aliasc_fallback_split_withenv() {
+    __aliasc_fallback_we_env=
+    __aliasc_fallback_we_body=
+    __aliasc_fallback_we_q=
+    __aliasc_fallback_we_depth=1
+    __aliasc_fallback_we_s=$1
+    while [ -n "$__aliasc_fallback_we_s" ]; do
+        __aliasc_fallback_we_c=${__aliasc_fallback_we_s%"${__aliasc_fallback_we_s#?}"}
+        __aliasc_fallback_we_s=${__aliasc_fallback_we_s#?}
+        if [ -n "$__aliasc_fallback_we_q" ]; then
+            [ "$__aliasc_fallback_we_c" = "$__aliasc_fallback_we_q" ] && __aliasc_fallback_we_q=
+        elif [ "$__aliasc_fallback_we_c" = "'" ] || [ "$__aliasc_fallback_we_c" = '"' ]; then
+            __aliasc_fallback_we_q=$__aliasc_fallback_we_c
+        elif [ "$__aliasc_fallback_we_c" = '(' ]; then
+            __aliasc_fallback_we_depth=$((__aliasc_fallback_we_depth + 1))
+        elif [ "$__aliasc_fallback_we_c" = ')' ]; then
+            __aliasc_fallback_we_depth=$((__aliasc_fallback_we_depth - 1))
+            if [ "$__aliasc_fallback_we_depth" -eq 0 ]; then
+                __aliasc_fallback_we_body=$__aliasc_fallback_we_s
+                return
+            fi
+        fi
+        __aliasc_fallback_we_env="$__aliasc_fallback_we_env$__aliasc_fallback_we_c"
+    done
+}
+
+__aliasc_fallback_define() {
+    __aliasc_fallback_name=$1
+    __aliasc_fallback_body=$2
+    unalias "$__aliasc_fallback_name" 2>/dev/null || :
+
+    __aliasc_fallback_body=$(
+        __aliasc_fallback_out=
+        __aliasc_fallback_q=
+        __aliasc_fallback_s=$__aliasc_fallback_body
+        while [ -n "$__aliasc_fallback_s" ]; do
+            __aliasc_fallback_c=${__aliasc_fallback_s%"${__aliasc_fallback_s#?}"}
+            __aliasc_fallback_s=${__aliasc_fallback_s#?}
+            if [ "$__aliasc_fallback_q" = "'" ]; then
+                [ "$__aliasc_fallback_c" = "'" ] && __aliasc_fallback_q=
+                __aliasc_fallback_out="$__aliasc_fallback_out$__aliasc_fallback_c"
+            elif [ "$__aliasc_fallback_q" = '"' ]; then
+                [ "$__aliasc_fallback_c" = '"' ] && __aliasc_fallback_q=
+                __aliasc_fallback_out="$__aliasc_fallback_out$__aliasc_fallback_c"
+            elif [ "$__aliasc_fallback_c" = "'" ]; then
+                __aliasc_fallback_q=\'
+                __aliasc_fallback_out="$__aliasc_fallback_out$__aliasc_fallback_c"
+            elif [ "$__aliasc_fallback_c" = '"' ]; then
+                __aliasc_fallback_q=\"
+                __aliasc_fallback_out="$__aliasc_fallback_out$__aliasc_fallback_c"
+            elif [ "$__aliasc_fallback_c" = '#' ]; then
+                __aliasc_fallback_s=
+            else
+                __aliasc_fallback_out="$__aliasc_fallback_out$__aliasc_fallback_c"
+            fi
+        done
+        printf '%s' "$__aliasc_fallback_out"
+    )
+
+    case "$__aliasc_fallback_body" in
+        '?('*) __aliasc_fallback_body="FirstAvailable${__aliasc_fallback_body#?}" ;;
+    esac
+
+    if [ "${__aliasc_fallback_body#FirstAvailable}" != "$__aliasc_fallback_body" ]; then
+        __aliasc_fallback_payload=${__aliasc_fallback_body#FirstAvailable}
+        __aliasc_fallback_payload=${__aliasc_fallback_payload#?}
+        __aliasc_fallback_payload=${__aliasc_fallback_payload%?}
+        # Candidates may be comma-separated or one per line. Only line breaks
+        # are folded, because a candidate may itself contain spaces.
+        __aliasc_fallback_payload=$(printf '%s\n' "$__aliasc_fallback_payload" | command tr '\n' ',')
+        __aliasc_fallback_candidates=$__aliasc_fallback_payload
+        __aliasc_fallback_define_first_available "$__aliasc_fallback_name" "$__aliasc_fallback_candidates"
+        return
+    fi
+
+    if [ "${__aliasc_fallback_body#SetEnv}" != "$__aliasc_fallback_body" ]; then
+        __aliasc_fallback_payload=${__aliasc_fallback_body#SetEnv}
+        __aliasc_fallback_payload=${__aliasc_fallback_payload#?}
+        __aliasc_fallback_payload=${__aliasc_fallback_payload%?}
+        __aliasc_fallback_payload=$(printf '%s\n' "$__aliasc_fallback_payload" | command tr '\n' ' ')
+        eval "${__aliasc_fallback_name}() { export $__aliasc_fallback_payload; }"
+        return
+    elif [ "${__aliasc_fallback_body#UnsetEnv}" != "$__aliasc_fallback_body" ]; then
+        __aliasc_fallback_payload=${__aliasc_fallback_body#UnsetEnv}
+        __aliasc_fallback_payload=${__aliasc_fallback_payload#?}
+        __aliasc_fallback_payload=${__aliasc_fallback_payload%?}
+        __aliasc_fallback_payload=$(printf '%s\n' "$__aliasc_fallback_payload" | command tr '\n' ' ')
+        eval "${__aliasc_fallback_name}() { unset $__aliasc_fallback_payload; }"
+        return
+    elif [ "${__aliasc_fallback_body#WithEnv}" != "$__aliasc_fallback_body" ]; then
+        __aliasc_fallback_payload=${__aliasc_fallback_body#WithEnv}
+        __aliasc_fallback_payload=${__aliasc_fallback_payload#?}
+        __aliasc_fallback_split_withenv "$__aliasc_fallback_payload"
+        __aliasc_fallback_env=$(printf '%s\n' "$__aliasc_fallback_we_env" | command tr '\n' ' ')
+        __aliasc_fallback_command=$(printf '%s\n' "$__aliasc_fallback_we_body" | command tr '\n' ' ' | command sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        case "$__aliasc_fallback_command" in
+            \\*) __aliasc_fallback_command="command ${__aliasc_fallback_command#\\}" ;;
+        esac
+        if [ -n "$__aliasc_fallback_command" ]; then
+            eval "${__aliasc_fallback_name}() { ( export $__aliasc_fallback_env; $__aliasc_fallback_command \"\$@\" ); }"
+        else
+            eval "${__aliasc_fallback_name}() { ( export $__aliasc_fallback_env; \"\$@\" ); }"
+        fi
+        return
+    fi
+
+    # The remaining templates are single commands; folding line breaks keeps a
+    # multi-line body valid inside the generated function.
+    __aliasc_fallback_body=$(printf '%s\n' "$__aliasc_fallback_body" | command tr '\n' ' ')
+
+    case "$__aliasc_fallback_body" in
+        *@@*)
+            __aliasc_fallback_body=$(printf '%s' "$__aliasc_fallback_body" | command sed 's/@@/@/g')
+            ;;
+    esac
+
+    case "$__aliasc_fallback_body" in
+        *@\**|*@1*|*@2*|*@3*|*@4*|*@5*|*@6*|*@7*|*@8*|*@9*)
+            __aliasc_fallback_body=$(printf '%s' "$__aliasc_fallback_body" | command sed \
+                -e 's/@\*/"$@"/g' \
+                -e 's/@1/"$1"/g' -e 's/@2/"$2"/g' \
+                -e 's/@3/"$3"/g' -e 's/@4/"$4"/g' \
+                -e 's/@5/"$5"/g' -e 's/@6/"$6"/g' \
+                -e 's/@7/"$7"/g' -e 's/@8/"$8"/g' \
+                -e 's/@9/"$9"/g')
+            ;;
+        *) __aliasc_fallback_body="$__aliasc_fallback_body \"\$@\"" ;;
+    esac
+
+    case "$__aliasc_fallback_body" in
+        \\*) __aliasc_fallback_body="command ${__aliasc_fallback_body#\\}" ;;
+        *';'*|*'|'*|*'&&'*|*'||'*) ;;
+        command\ *|export\ *|unset\ *|return\ *|:* ) ;;
+        *) __aliasc_fallback_body="command $__aliasc_fallback_body" ;;
+    esac
+    eval "${__aliasc_fallback_name}() { $__aliasc_fallback_body; }"
+}
+
+__aliasc_fallback_section_active() {
+    case "$1" in
+        ''|Common) return 0 ;;
+        UNIX)
+            case "$__aliasc_fallback_os" in
+                Linux|Darwin) return 0 ;;
+                *) return 1 ;;
+            esac
+            ;;
+        macOS) [ "$__aliasc_fallback_os" = Darwin ] ;;
+        Windows) return 1 ;;
+        *) [ "$__aliasc_fallback_os" = Linux ] && [ "$1" = "$__aliasc_fallback_distro" ] ;;
+    esac
+}
+
+__aliasc_fallback_parse_file() {
+    [ -f "$1" ] || return 0
+    __aliasc_fallback_section=
+    __aliasc_fallback_in_multiline=0
+    __aliasc_fallback_multiline_name=
+    __aliasc_fallback_multiline_body=
+    __aliasc_fallback_multiline_depth=0
+    while IFS= read -r __aliasc_fallback_line || [ -n "$__aliasc_fallback_line" ]; do
+        __aliasc_fallback_line=$(printf '%s' "$__aliasc_fallback_line" | command sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        if [ "$__aliasc_fallback_in_multiline" -eq 1 ]; then
+            case "$__aliasc_fallback_line" in
+                ''|'#'*|';'*) continue ;;
+            esac
+            __aliasc_fallback_line=$(__aliasc_fallback_strip_comment "$__aliasc_fallback_line")
+            __aliasc_fallback_line=$(printf '%s' "$__aliasc_fallback_line" | command sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            [ -n "$__aliasc_fallback_line" ] || continue
+            __aliasc_fallback_multiline_body=$(printf '%s\n%s' "$__aliasc_fallback_multiline_body" "$__aliasc_fallback_line")
+            __aliasc_fallback_paren_delta "$__aliasc_fallback_line"
+            __aliasc_fallback_multiline_depth=$((__aliasc_fallback_multiline_depth + __aliasc_fallback_pd_delta))
+            if [ "$__aliasc_fallback_multiline_depth" -le 0 ]; then
+                __aliasc_fallback_in_multiline=0
+                __aliasc_fallback_define "$__aliasc_fallback_multiline_name" "$__aliasc_fallback_multiline_body"
+            fi
+        else
+            case "$__aliasc_fallback_line" in
+                ''|'#'*|';'*|include\ *) continue ;;
+                \[*\])
+                    __aliasc_fallback_section=${__aliasc_fallback_line#\[}
+                    __aliasc_fallback_section=${__aliasc_fallback_section%\]}
+                    ;;
+                *=*)
+                    __aliasc_fallback_section_active "$__aliasc_fallback_section" || continue
+                    __aliasc_fallback_name=${__aliasc_fallback_line%%=*}
+                    __aliasc_fallback_body=${__aliasc_fallback_line#*=}
+                    __aliasc_fallback_body=$(__aliasc_fallback_strip_comment "$__aliasc_fallback_body")
+                    __aliasc_fallback_body=$(printf '%s' "$__aliasc_fallback_body" | command sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+                    [ -n "$__aliasc_fallback_name" ] || continue
+                    __aliasc_fallback_paren_delta "$__aliasc_fallback_body"
+                    if [ "$__aliasc_fallback_pd_delta" -gt 0 ]; then
+                        __aliasc_fallback_in_multiline=1
+                        __aliasc_fallback_multiline_name=$__aliasc_fallback_name
+                        __aliasc_fallback_multiline_body=$__aliasc_fallback_body
+                        __aliasc_fallback_multiline_depth=$__aliasc_fallback_pd_delta
+                    else
+                        __aliasc_fallback_define "$__aliasc_fallback_name" "$__aliasc_fallback_body"
+                    fi
+                    ;;
+            esac
+        fi
+    done < "$1"
+    if [ "$__aliasc_fallback_in_multiline" -eq 1 ]; then
+        printf '%s\n' "aliasc: unclosed '(' in multi-line definition: $__aliasc_fallback_multiline_name" >&2
+    fi
+}
+
+__aliasc_fallback_load() {
+    : "${ALIAS_FILE:=$HOME/.config/alias}"
+    : "${ALIASC_LOCAL_FILE:=$HOME/.config/alias.local}"
+    __aliasc_fallback_os=$(uname -s 2>/dev/null || printf '%s' unknown)
+    __aliasc_fallback_distro=
+    if [ -f /etc/os-release ]; then
+        __aliasc_fallback_distro=$(command sed -n 's/^ID=//p' /etc/os-release | command sed 's/^"//;s/"$//' | command head -n 1)
+    fi
+    case "$__aliasc_fallback_distro" in
+        ubuntu) __aliasc_fallback_distro=Ubuntu ;;
+        debian) __aliasc_fallback_distro=Debian ;;
+        fedora) __aliasc_fallback_distro=Fedora ;;
+        arch) __aliasc_fallback_distro=Arch ;;
+    esac
+    __aliasc_fallback_section=
+    __aliasc_fallback_parse_file "$ALIAS_FILE"
+    __aliasc_fallback_parse_file "$ALIASC_LOCAL_FILE"
+    unalias raw 2>/dev/null || :
+    raw() {
+        command "$@"
+    }
+}
+
+__aliasc_wait_after_error() {
+    printf '%s' 'aliasc: press Enter to continue ...' >&2
+    IFS= read -r
+    printf '\n' >&2
+}
