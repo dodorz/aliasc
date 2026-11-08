@@ -40,14 +40,14 @@ fn posix_alias_name_and_lowercase_variant_execute_the_same_definition() {
 fn posix_fallback_supports_multiline_definitions() {
     use std::{os::unix::fs::PermissionsExt, process::{Command,Stdio}};
     let d=tempdir().unwrap(); let root=d.path();
-    let downloader=root.join(".local/bin/aliasc.sh");
-    fs::create_dir_all(downloader.parent().unwrap()).unwrap();
-    fs::write(&downloader,"#!/bin/sh\nexit 1\n").unwrap();
-    fs::set_permissions(&downloader,fs::Permissions::from_mode(0o755)).unwrap();
+    let fetcher=root.join(".local/bin/aliasc-fetch.sh");
+    fs::create_dir_all(fetcher.parent().unwrap()).unwrap();
+    fs::write(&fetcher,"#!/bin/sh\nexit 1\n").unwrap();
+    fs::set_permissions(&fetcher,fs::Permissions::from_mode(0o755)).unwrap();
     let source=root.join("alias");
     fs::write(&source,"[Common]\ncat=FirstAvailable(\nno-such-aliasc-candidate\necho\n)\nfly=WithEnv(\nHTTPS_PROXY=http://127.0.0.1:7890\nHTTP_PROXY=http://127.0.0.1:7890\n) printf '%s %s\\n' ${HTTPS_PROXY} ${HTTP_PROXY}\nsetv=SetEnv(\nALPHA=one\nBETA=\"two three\"\n)\nclean=UnsetEnv(\nALPHA\nBETA\n)\n").unwrap();
-    let loader=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("alias.sh");
-    let script=format!(". '{}'\ncat hello\nfly\nsetv\nprintf '[%s][%s]\\n' \"${{ALPHA-}}\" \"${{BETA-}}\"\nclean\nprintf '[%s][%s]\\n' \"${{ALPHA-}}\" \"${{BETA-}}\"\n",loader.display());
+    let activator=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("aliasc-activate.sh");
+    let script=format!(". '{}'\ncat hello\nfly\nsetv\nprintf '[%s][%s]\\n' \"${{ALPHA-}}\" \"${{BETA-}}\"\nclean\nprintf '[%s][%s]\\n' \"${{ALPHA-}}\" \"${{BETA-}}\"\n",activator.display());
     let result=Command::new("sh").arg("-c").arg(&script).env("HOME",root).env("ALIAS_FILE",&source).stdin(Stdio::null()).output().unwrap();
     assert_eq!(String::from_utf8_lossy(&result.stdout),"hello\nhttp://127.0.0.1:7890 http://127.0.0.1:7890\n[one][two three]\n[][]\n","{}",String::from_utf8_lossy(&result.stderr));
     assert!(result.status.success());
@@ -55,7 +55,7 @@ fn posix_fallback_supports_multiline_definitions() {
 
 #[cfg(unix)]
 #[test]
-fn unix_downloader_falls_back_from_curl_to_wget() {
+fn unix_fetcher_falls_back_from_curl_to_wget() {
     use std::{os::unix::fs::PermissionsExt, process::Command};
     let d=tempdir().unwrap(); let root=d.path();
     let tools=root.join("bin"); fs::create_dir_all(&tools).unwrap();
@@ -64,7 +64,7 @@ fn unix_downloader_falls_back_from_curl_to_wget() {
     fs::write(tools.join("wget"),format!("#!/bin/sh\nout=\nurl=\nwhile [ \"$#\" -gt 0 ]; do case \"$1\" in -O) out=$2; shift 2 ;; -*) shift ;; *) url=$1; shift ;; esac; done\nprintf 'wget %s\\n' \"$url\" >> '{}'\nprintf '#!/bin/sh\\n' > \"$out\"\n",log.display())).unwrap();
     for tool in ["curl","wget"] { fs::set_permissions(tools.join(tool),fs::Permissions::from_mode(0o755)).unwrap(); }
     let cache=root.join("cache");
-    let script=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("aliasc.sh");
+    let script=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("aliasc-fetch.sh");
     let path=format!("{}:{}",tools.display(),std::env::var("PATH").unwrap_or_default());
     let result=Command::new("sh").arg(&script).args(["--platform","linux-x86_64-musl","--print-binary-path"]).env("PATH",path).env("ALIASC_BINARY_CACHE_DIR",&cache).output().unwrap();
     assert!(result.status.success(),"{}",String::from_utf8_lossy(&result.stderr));

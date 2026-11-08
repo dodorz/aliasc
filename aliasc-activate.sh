@@ -1,6 +1,12 @@
 #!/bin/sh
-# aliasc POSIX startup loader.
-# Uses the aliasc binary directly; cache staleness checked via file mtime.
+# aliasc-activate.sh - POSIX shell startup glue.
+#
+# Responsibility: turn the DSL source into live shell functions. It asks
+# aliasc-fetch.sh for the compiler, recompiles only when an input is newer
+# than the cached artifact, then sources the artifact into the current shell.
+# If the compiler is unavailable it falls back to the pure-shell parser below.
+#
+# Install as: ~/.config/interactive.d/10-aliasc-activate.sh
 
 if [ "${ALIASDSL_NOLOAD-}" = 1 ]; then
     return 0 2>/dev/null || exit 0
@@ -380,16 +386,16 @@ __aliasc_source_dir=${ALIAS_FILE%/*}
 : "${ALIASC_LOCAL_FILE:=$__aliasc_source_dir/alias.local}"
 : "${ALIASC_SHORTCUT_MAP:=$__aliasc_source_dir/ShortcutMap.yaml}"
 
-__aliasc_downloader=$HOME/.local/bin/aliasc.sh
-if [ ! -x "$__aliasc_downloader" ]; then
-    printf '%s\n' "aliasc: downloader not found: $__aliasc_downloader" >&2
+__aliasc_fetcher=$HOME/.local/bin/aliasc-fetch.sh
+if [ ! -x "$__aliasc_fetcher" ]; then
+    printf '%s\n' "aliasc: fetcher not found: $__aliasc_fetcher" >&2
     return 1 2>/dev/null || exit 1
 fi
 
-__aliasc_binary=$("$__aliasc_downloader" --print-binary-path 2>/dev/null) || true
+__aliasc_binary=$("$__aliasc_fetcher" --print-binary-path 2>/dev/null) || true
 if [ -z "$__aliasc_binary" ] || [ ! -x "$__aliasc_binary" ]; then
     printf '%s\n' "aliasc: binary not found; attempting download..." >&2
-    "$__aliasc_downloader" >/dev/null || {
+    "$__aliasc_fetcher" >/dev/null || {
         printf '%s\n' 'aliasc: download failed; using shell fallback' >&2
         __aliasc_fallback=1
         __aliasc_wait_after_error
@@ -452,7 +458,7 @@ else
     return 1 2>/dev/null || exit 1
 fi
 
-unset __aliasc_source_dir __aliasc_binary __aliasc_downloader __aliasc_function_list
+unset __aliasc_source_dir __aliasc_binary __aliasc_fetcher __aliasc_function_list
 unset __aliasc_function_name __aliasc_source_status __aliasc_needs_compile
 unset ALIASC_LOCAL_FILE ALIASC_SHORTCUT_MAP ALIASC_CACHE_DIR ALIASC_MANIFEST
 

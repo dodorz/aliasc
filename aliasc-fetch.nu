@@ -1,7 +1,10 @@
 #!/usr/bin/env nu
-# aliasc binary downloader for nushell.
-# Ensures the matching release binary is cached locally.
-# If called with extra arguments, downloads if needed then execs the binary.
+# aliasc-fetch.nu - fetch (download + cache) the aliasc compiler binary (nushell).
+#
+# Responsibility: binary provisioning ONLY. Never parses the alias DSL and
+# never writes shell code.
+#
+# Companion: aliasc-activate.sh (shell startup glue: compile + load).
 
 let repo = ($env.ALIASC_REPOSITORY | default "dodorz/aliasc")
 let release = ($env.ALIASC_RELEASE | default "latest")

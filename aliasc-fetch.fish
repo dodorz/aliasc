@@ -1,7 +1,10 @@
 #!/usr/bin/env fish
-# aliasc binary downloader for fish.
-# Ensures the matching release binary is cached locally.
-# If called with extra arguments, downloads if needed then execs the binary.
+# aliasc-fetch.fish - fetch (download + cache) the aliasc compiler binary (fish).
+#
+# Responsibility: binary provisioning ONLY. Never parses the alias DSL and
+# never writes shell code.
+#
+# Companion: aliasc-activate.sh (shell startup glue: compile + load).
 
 set -l repo "dodorz/aliasc"
 if set -q ALIASC_REPOSITORY
