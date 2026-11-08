@@ -206,11 +206,11 @@ line to the profile of each shell you use:
 
 ### Where the files live
 
-All seven scripts stay together in the checkout; only the activator you source
+All seven scripts stay together in one directory; only the activator you source
 has to be reachable from your profile.
 
 ```
-~/proj/aliasc/          <- keep them together, wherever you cloned the repo
+/path/to/aliasc/        <- anywhere on the machine
   alias.sh              <- sourced by sh/bash/zsh
   alias.fish  alias.nu  alias.ps1
   alias-core.sh         <- located by the activator, never sourced directly
@@ -218,36 +218,38 @@ has to be reachable from your profile.
   alias-fallback.sh     <- located by alias.sh
 ```
 
-Recommended profiles, with the activator symlinked so `git pull` keeps it current:
+Point each profile at the activator in that directory:
 
 ```sh
 # ~/.shrc / ~/.bashrc
-ln -s ~/proj/aliasc/alias.sh ~/.config/interactive.d/10-alias.sh
+. /path/to/aliasc/alias.sh
 ```
 ```fish
 # ~/.config/fish/config.fish
-source ~/proj/aliasc/alias.fish
+source /path/to/aliasc/alias.fish
 ```
 ```nu
 # config.nu
-source ~/proj/aliasc/alias.nu
+source /path/to/aliasc/alias.nu
 ```powershell
 # $PROFILE
-. ~/proj/aliasc/alias.ps1
+. /path/to/aliasc/alias.ps1
 ```
 
 `$ALIASC_LIB_DIR` wins outright when you set it. Otherwise each activator
-resolves its own path (following symlinks with `readlink -f`) and looks for
-`alias-core.sh` next to itself, then in `~/proj/aliasc`, then in
-`${XDG_DATA_HOME:-~/.local/share}/aliasc`.
+resolves its own path (following symlinks with `readlink -f`, so a linked
+activator still finds its siblings at the target) and looks for `alias-core.sh`
+in this order:
+
+1. the directory the activator lives in
+2. `${XDG_DATA_HOME:-~/.local/share}/aliasc`
 
 `alias-core.sh` finds `alias-fetch.sh` the same way: `$ALIASC_FETCHER` wins when
-set, otherwise it looks next to itself, then `~/proj/aliasc`, then
-`~/.local/bin`.
+set, otherwise it looks beside itself, then in
+`${XDG_DATA_HOME:-~/.local/share}/aliasc`, then in `~/.local/bin`.
 
-Nothing has to be copied into `~/.local/share` or `~/.local/bin`. Those entries
-exist only so a symlinked activator, or one moved away from the checkout, still
-resolves.
+Both lists are install locations only - no path is hard-wired to a particular
+checkout.
 
 The fish, nushell, and PowerShell activators call `alias-core.sh` through `sh`
 rather than reimplementing download and staleness logic. PowerShell is the only

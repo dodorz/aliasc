@@ -83,15 +83,15 @@ esac
 
 : "${source_file:=${ALIAS_FILE:-$HOME/.config/alias}}"
 : "${cache_dir:=${XDG_CACHE_HOME:-$HOME/.cache}/aliasc}"
-# The fetcher ships next to this script in the aliasc checkout, so look there
-# before falling back to a PATH-style install location.
+# The fetcher ships next to this script, so look there before falling back to
+# the standard data directory or a PATH-style install location.
 : "${fetcher:=${ALIASC_FETCHER:-}}"
 if [ -z "$fetcher" ]; then
     __core_dir=${0%/*}
     [ "$__core_dir" = "$0" ] && __core_dir=.
     __core_resolved=$(readlink -f "$0" 2>/dev/null) || __core_resolved=
     [ -n "$__core_resolved" ] && __core_dir=${__core_resolved%/*}
-    for __core_candidate in "$__core_dir" "$HOME/proj/aliasc" "$HOME/.local/bin"; do
+    for __core_candidate in "$__core_dir" "${XDG_DATA_HOME:-$HOME/.local/share}/aliasc" "$HOME/.local/bin"; do
         [ -n "$__core_candidate" ] || continue
         if [ -f "$__core_candidate/alias-fetch.sh" ]; then
             fetcher=$__core_candidate/alias-fetch.sh

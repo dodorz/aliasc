@@ -15,8 +15,8 @@ if set -q ALIASDSL_NOLOAD; and test "$ALIASDSL_NOLOAD" = 1
     return 0
 end
 
-# These scripts live in the aliasc checkout and are installed by hand, so look
-# next to this file first instead of assuming a fixed install prefix.
+# These scripts are installed by hand, so look next to this file first instead
+# of assuming a fixed install prefix.
 if not set -q ALIASC_LIB_DIR
     set -l self (status filename)
     set -l self_dir (dirname $self)
@@ -25,14 +25,14 @@ if not set -q ALIASC_LIB_DIR
     if test -n "$resolved"
         set self_dir (dirname $resolved)
     end
-    for candidate in $self_dir $HOME/proj/aliasc (set -q XDG_DATA_HOME; and echo $XDG_DATA_HOME/aliasc; or echo $HOME/.local/share/aliasc)
+    for candidate in $self_dir (set -q XDG_DATA_HOME; and echo $XDG_DATA_HOME/aliasc; or echo $HOME/.local/share/aliasc)
         if test -f "$candidate/alias-core.sh"
             set -g ALIASC_LIB_DIR $candidate
             break
         end
     end
 end
-set -q ALIASC_LIB_DIR; or set -g ALIASC_LIB_DIR $HOME/proj/aliasc
+set -q ALIASC_LIB_DIR; or set -g ALIASC_LIB_DIR (set -q XDG_DATA_HOME; and echo $XDG_DATA_HOME/aliasc; or echo $HOME/.local/share/aliasc)
 set -q ALIASC_CORE; or set -g ALIASC_CORE $ALIASC_LIB_DIR/alias-core.sh
 set -q ALIASC_CACHE_DIR; or set -g ALIASC_CACHE_DIR (set -q XDG_CACHE_HOME; and echo $XDG_CACHE_HOME; or echo $HOME/.cache)/aliasc
 set -q ALIAS_FILE; or set -g ALIAS_FILE $HOME/.config/alias

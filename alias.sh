@@ -9,8 +9,9 @@
 # fallback (alias-fallback.sh), because POSIX function bodies can be eval-ed
 # directly - the other shells cannot consume them.
 #
-# Install it yourself from your shell profile, e.g.
-#   ~/.config/interactive.d/10-alias.sh  or  . ~/proj/aliasc/alias.sh
+# Install it yourself from your shell profile:  . /path/to/aliasc/alias.sh
+# Either keep the checkout in place and source it, or symlink this file next to
+# the other glue in ${XDG_DATA_HOME:-~/.local/share}/aliasc.
 
 if [ "${ALIASDSL_NOLOAD-}" = 1 ]; then
     return 0 2>/dev/null || exit 0
@@ -20,9 +21,8 @@ fi
 : "${ALIASC_FETCHER:=}"
 : "${ALIAS_FILE:=$HOME/.config/alias}"
 
-# Locate the rest of the glue. These scripts live in the aliasc checkout and are
-# installed by hand, so find the directory this file was sourced from instead of
-# assuming a fixed install prefix.
+# Locate the rest of the glue. These scripts are installed by hand, so find the
+# directory this file was sourced from instead of assuming a fixed prefix.
 __aliasc_self=
 if [ -n "${BASH_SOURCE-}" ]; then
     __aliasc_self=${BASH_SOURCE}
@@ -35,10 +35,9 @@ __aliasc_self_dir=
 if [ -n "$__aliasc_self" ]; then
     __aliasc_self_dir=${__aliasc_self%/*}
     [ "$__aliasc_self_dir" = "$__aliasc_self" ] && __aliasc_self_dir=.
-    # Follow symlinks: a common install is `ln -s ~/proj/aliasc/alias.sh
-    # ~/.config/interactive.d/10-alias.sh`, and the siblings live at the target,
-    # not next to the link. `readlink -f` is GNU and BSD; without it the
-    # search below still falls through to the other candidates.
+    # Follow symlinks: when this file is linked into a profile directory the
+    # siblings live at the target, not next to the link. `readlink -f` is GNU
+    # and BSD; without it the search below falls through to its other candidate.
     __aliasc_resolved=$(readlink -f "$__aliasc_self" 2>/dev/null) || __aliasc_resolved=
     [ -n "$__aliasc_resolved" ] && __aliasc_self_dir=${__aliasc_resolved%/*}
 fi
@@ -46,7 +45,6 @@ fi
 if [ -z "${ALIASC_LIB_DIR-}" ]; then
     for __aliasc_candidate in \
         "$__aliasc_self_dir" \
-        "$HOME/proj/aliasc" \
         "${XDG_DATA_HOME:-$HOME/.local/share}/aliasc"; do
         [ -n "$__aliasc_candidate" ] || continue
         if [ -f "$__aliasc_candidate/alias-core.sh" ]; then
@@ -70,6 +68,7 @@ __aliasc_activate() {
     __aliasc_output=
     if [ ! -f "$ALIASC_CORE" ]; then
         printf 'aliasc: core not found: %s\n' "$ALIASC_CORE" >&2
+        printf '%s\n' 'aliasc: set ALIASC_LIB_DIR to the directory holding alias-core.sh' >&2
     elif [ -n "$ALIASC_FETCHER" ]; then
         __aliasc_output=$(sh "$ALIASC_CORE" --shell posix --source "$ALIAS_FILE" \
             --cache-dir "$ALIASC_CACHE_DIR" --fetcher "$ALIASC_FETCHER")

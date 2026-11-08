@@ -17,12 +17,12 @@
 # POSIX function bodies, which PowerShell cannot consume.
 #
 # Install from $PROFILE:
-#   . ~/proj/aliasc/alias.ps1
+#   . /path/to/aliasc/alias.ps1
 
 if ($env:ALIASDSL_NOLOAD -eq '1') { return }
 
-# These scripts live in the aliasc checkout and are installed by hand, so look
-# next to this file first instead of assuming a fixed install prefix.
+# These scripts are installed by hand, so look next to this file first instead
+# of assuming a fixed install prefix.
 $libDir = $env:ALIASC_LIB_DIR
 if (-not $libDir) {
     # Follow symlinks: the siblings live at the target, not next to the link.
@@ -31,13 +31,10 @@ if (-not $libDir) {
         $resolved = (Resolve-Path -LiteralPath $PSCommandPath -ErrorAction SilentlyContinue).Path
         if ($resolved) { $selfDir = Split-Path -Parent $resolved }
     }
-    $candidates = @(
-        if ($selfDir) { $selfDir }
-        (Join-Path $HOME 'proj/aliasc')
-        if ($env:XDG_DATA_HOME) { Join-Path $env:XDG_DATA_HOME 'aliasc' } else { Join-Path $HOME '.local/share/aliasc' }
-    )
+    $dataDir = if ($env:XDG_DATA_HOME) { Join-Path $env:XDG_DATA_HOME 'aliasc' } else { Join-Path $HOME '.local/share/aliasc' }
+    $candidates = @($selfDir, $dataDir) | Where-Object { $_ }
     $libDir = $candidates | Where-Object { Test-Path -LiteralPath (Join-Path $_ 'alias-core.sh') -PathType Leaf } | Select-Object -First 1
-    if (-not $libDir) { $libDir = Join-Path $HOME 'proj/aliasc' }
+    if (-not $libDir) { $libDir = $dataDir }
 }
 $fetcher = if ($env:ALIASC_FETCHER) { $env:ALIASC_FETCHER } else { Join-Path $HOME '.local/bin/alias-fetch.sh' }
 $cacheDir = if ($env:ALIASC_CACHE_DIR) { $env:ALIASC_CACHE_DIR }
