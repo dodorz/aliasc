@@ -89,14 +89,17 @@ esac
 if [ -z "$fetcher" ]; then
     __core_dir=${0%/*}
     [ "$__core_dir" = "$0" ] && __core_dir=.
-    if [ -f "$__core_dir/alias-fetch.sh" ]; then
-        fetcher=$__core_dir/alias-fetch.sh
-    elif [ -f "$HOME/.local/bin/alias-fetch.sh" ]; then
-        fetcher=$HOME/.local/bin/alias-fetch.sh
-    else
-        fetcher=$HOME/proj/aliasc/alias-fetch.sh
-    fi
-    unset __core_dir
+    __core_resolved=$(readlink -f "$0" 2>/dev/null) || __core_resolved=
+    [ -n "$__core_resolved" ] && __core_dir=${__core_resolved%/*}
+    for __core_candidate in "$__core_dir" "$HOME/proj/aliasc" "$HOME/.local/bin"; do
+        [ -n "$__core_candidate" ] || continue
+        if [ -f "$__core_candidate/alias-fetch.sh" ]; then
+            fetcher=$__core_candidate/alias-fetch.sh
+            break
+        fi
+    done
+    [ -n "$fetcher" ] || fetcher=$__core_dir/alias-fetch.sh
+    unset __core_dir __core_resolved __core_candidate
 fi
 
 [ -f "$source_file" ] || fail "alias source is missing: $source_file"

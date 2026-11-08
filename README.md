@@ -204,11 +204,50 @@ line to the profile of each shell you use:
 | nushell | `source /path/to/aliasc/alias.nu` in `config.nu` | `alias.nu` |
 | PowerShell 5.1 / 7+ | `. /path/to/aliasc/alias.ps1` in `$PROFILE` | `alias.pwsh`, `alias.powershell` |
 
-Each activator finds its siblings next to itself, so a checkout needs no install
-step: `alias.sh` uses `${BASH_SOURCE}`/`${(%):-%x}`/`${.sh.file}`, `alias.fish`
-uses `status filename`, `alias.nu` uses `$env.CURRENT_FILE`, and `alias.ps1` uses
-`$PSScriptRoot`. `ALIASC_LIB_DIR` overrides the search when you keep the files
-apart.
+### Where the files live
+
+All seven scripts stay together in the checkout; only the activator you source
+has to be reachable from your profile.
+
+```
+~/proj/aliasc/          <- keep them together, wherever you cloned the repo
+  alias.sh              <- sourced by sh/bash/zsh
+  alias.fish  alias.nu  alias.ps1
+  alias-core.sh         <- located by the activator, never sourced directly
+  alias-fetch.sh        <- located by the core
+  alias-fallback.sh     <- located by alias.sh
+```
+
+Recommended profiles, with the activator symlinked so `git pull` keeps it current:
+
+```sh
+# ~/.shrc / ~/.bashrc
+ln -s ~/proj/aliasc/alias.sh ~/.config/interactive.d/10-alias.sh
+```
+```fish
+# ~/.config/fish/config.fish
+source ~/proj/aliasc/alias.fish
+```
+```nu
+# config.nu
+source ~/proj/aliasc/alias.nu
+```powershell
+# $PROFILE
+. ~/proj/aliasc/alias.ps1
+```
+
+`$ALIASC_LIB_DIR` wins outright when you set it. Otherwise each activator
+resolves its own path (following symlinks with `readlink -f`) and looks for
+`alias-core.sh` next to itself, then in `~/proj/aliasc`, then in
+`${XDG_DATA_HOME:-~/.local/share}/aliasc`.
+
+`alias-core.sh` finds `alias-fetch.sh` the same way: `$ALIASC_FETCHER` wins when
+set, otherwise it looks next to itself, then `~/proj/aliasc`, then
+`~/.local/bin`.
+
+Nothing has to be copied into `~/.local/share` or `~/.local/bin`. Those entries
+exist only so a symlinked activator, or one moved away from the checkout, still
+resolves.
 
 The fish, nushell, and PowerShell activators call `alias-core.sh` through `sh`
 rather than reimplementing download and staleness logic. PowerShell is the only

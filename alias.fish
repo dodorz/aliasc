@@ -18,7 +18,13 @@ end
 # These scripts live in the aliasc checkout and are installed by hand, so look
 # next to this file first instead of assuming a fixed install prefix.
 if not set -q ALIASC_LIB_DIR
-    set -l self_dir (dirname (status filename))
+    set -l self (status filename)
+    set -l self_dir (dirname $self)
+    # Follow symlinks: the siblings live at the target, not next to the link.
+    set -l resolved (readlink -f $self 2>/dev/null)
+    if test -n "$resolved"
+        set self_dir (dirname $resolved)
+    end
     for candidate in $self_dir $HOME/proj/aliasc (set -q XDG_DATA_HOME; and echo $XDG_DATA_HOME/aliasc; or echo $HOME/.local/share/aliasc)
         if test -f "$candidate/alias-core.sh"
             set -g ALIASC_LIB_DIR $candidate

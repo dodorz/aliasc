@@ -32,7 +32,16 @@ elif [ -n "${KSH_VERSION-}" ]; then
     __aliasc_self=${.sh.file}
 fi
 __aliasc_self_dir=
-[ -n "$__aliasc_self" ] && __aliasc_self_dir=${__aliasc_self%/*}
+if [ -n "$__aliasc_self" ]; then
+    __aliasc_self_dir=${__aliasc_self%/*}
+    [ "$__aliasc_self_dir" = "$__aliasc_self" ] && __aliasc_self_dir=.
+    # Follow symlinks: a common install is `ln -s ~/proj/aliasc/alias.sh
+    # ~/.config/interactive.d/10-alias.sh`, and the siblings live at the target,
+    # not next to the link. `readlink -f` is GNU and BSD; without it the
+    # search below still falls through to the other candidates.
+    __aliasc_resolved=$(readlink -f "$__aliasc_self" 2>/dev/null) || __aliasc_resolved=
+    [ -n "$__aliasc_resolved" ] && __aliasc_self_dir=${__aliasc_resolved%/*}
+fi
 
 if [ -z "${ALIASC_LIB_DIR-}" ]; then
     for __aliasc_candidate in \
@@ -46,7 +55,7 @@ if [ -z "${ALIASC_LIB_DIR-}" ]; then
         fi
     done
 fi
-unset __aliasc_self __aliasc_self_dir __aliasc_candidate
+unset __aliasc_self __aliasc_self_dir __aliasc_resolved __aliasc_candidate
 
 : "${ALIASC_LIB_DIR:=${XDG_DATA_HOME:-$HOME/.local/share}/aliasc}"
 : "${ALIASC_CORE:=${ALIASC_LIB_DIR}/alias-core.sh}"

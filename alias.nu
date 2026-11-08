@@ -16,7 +16,14 @@ if (($env.ALIASDSL_NOLOAD? | default '') == '1') {
 
 # These scripts live in the aliasc checkout and are installed by hand, so look
 # next to this file first instead of assuming a fixed install prefix.
-let self_dir = ($env.CURRENT_FILE? | default '' | path dirname)
+# Follow symlinks: the siblings live at the target, not next to the link.
+let self_file = ($env.CURRENT_FILE? | default '')
+let self_dir = (
+    if $self_file == '' { '' } else {
+        let resolved = (try { ^readlink -f $self_file | str trim } catch { '' })
+        if $resolved == '' { $self_file | path dirname } else { $resolved | path dirname }
+    }
+)
 let candidates = ([
     $self_dir
     ($env.HOME | path join proj/aliasc)

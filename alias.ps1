@@ -25,8 +25,14 @@ if ($env:ALIASDSL_NOLOAD -eq '1') { return }
 # next to this file first instead of assuming a fixed install prefix.
 $libDir = $env:ALIASC_LIB_DIR
 if (-not $libDir) {
+    # Follow symlinks: the siblings live at the target, not next to the link.
+    $selfDir = $PSScriptRoot
+    if ($PSCommandPath) {
+        $resolved = (Resolve-Path -LiteralPath $PSCommandPath -ErrorAction SilentlyContinue).Path
+        if ($resolved) { $selfDir = Split-Path -Parent $resolved }
+    }
     $candidates = @(
-        if ($PSScriptRoot) { $PSScriptRoot }
+        if ($selfDir) { $selfDir }
         (Join-Path $HOME 'proj/aliasc')
         if ($env:XDG_DATA_HOME) { Join-Path $env:XDG_DATA_HOME 'aliasc' } else { Join-Path $HOME '.local/share/aliasc' }
     )
