@@ -33,7 +33,11 @@ if not type -q sh
     return 1
 end
 
-set -l artifact (sh $ALIASC_CORE --shell fish --source $ALIAS_FILE --cache-dir $ALIASC_CACHE_DIR)
+set -l core_args --shell fish --source $ALIAS_FILE --cache-dir $ALIASC_CACHE_DIR
+if set -q ALIASC_FETCHER; and test -n "$ALIASC_FETCHER"
+    set core_args $core_args --fetcher $ALIASC_FETCHER
+end
+set -l artifact (sh $ALIASC_CORE $core_args)
 if test $status -ne 0; or not test -f "$artifact"
     echo "aliasc: no fish artifact available; aliases are not loaded" >&2
     return 1

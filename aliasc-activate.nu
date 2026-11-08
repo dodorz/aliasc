@@ -34,7 +34,8 @@ if (which ^sh | is-empty) {
     return
 }
 
-let artifact = (^sh $core --shell nu --source $source_file --cache-dir $cache_dir | complete)
+let fetcher_args = (if (($env.ALIASC_FETCHER? | default '') | is-empty) { [] } else { [--fetcher $env.ALIASC_FETCHER] })
+let artifact = (^sh $core --shell nu --source $source_file --cache-dir $cache_dir ...$fetcher_args | complete)
 if $artifact.exit_code != 0 {
     print --stderr "aliasc: no nu artifact available; aliases are not loaded"
     return

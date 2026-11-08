@@ -19,6 +19,7 @@ fi
 : "${ALIASC_CORE:=${ALIASC_LIB_DIR}/aliasc-core.sh}"
 : "${ALIASC_FALLBACK:=${ALIASC_LIB_DIR}/aliasc-fallback.sh}"
 : "${ALIASC_CACHE_DIR:=${XDG_CACHE_HOME:-$HOME/.cache}/aliasc}"
+: "${ALIASC_FETCHER:=}"
 : "${ALIAS_FILE:=$HOME/.config/alias}"
 
 # Sourced by an interactive shell, so plain `return` is the correct exit.
@@ -32,7 +33,12 @@ __aliasc_activate() {
         return 1
     fi
 
-    __aliasc_output=$(sh "$ALIASC_CORE" --shell posix --source "$ALIAS_FILE" --cache-dir "$ALIASC_CACHE_DIR")
+    if [ -n "$ALIASC_FETCHER" ]; then
+        __aliasc_output=$(sh "$ALIASC_CORE" --shell posix --source "$ALIAS_FILE" \
+            --cache-dir "$ALIASC_CACHE_DIR" --fetcher "$ALIASC_FETCHER")
+    else
+        __aliasc_output=$(sh "$ALIASC_CORE" --shell posix --source "$ALIAS_FILE" --cache-dir "$ALIASC_CACHE_DIR")
+    fi
     if [ $? -ne 0 ] || [ ! -f "$__aliasc_output" ]; then
         if [ -f "$ALIASC_FALLBACK" ]; then
             printf '%s\n' 'aliasc: core failed; using the shell fallback' >&2

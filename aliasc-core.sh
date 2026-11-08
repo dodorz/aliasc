@@ -83,7 +83,7 @@ esac
 
 : "${source_file:=${ALIAS_FILE:-$HOME/.config/alias}}"
 : "${cache_dir:=${XDG_CACHE_HOME:-$HOME/.cache}/aliasc}"
-: "${fetcher:=$HOME/.local/bin/aliasc-fetch.sh}"
+: "${fetcher:=${ALIASC_FETCHER:-$HOME/.local/bin/aliasc-fetch.sh}}"
 
 [ -f "$source_file" ] || fail "alias source is missing: $source_file"
 [ -x "$fetcher" ] || fail "fetcher not found: $fetcher"
