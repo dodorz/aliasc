@@ -100,7 +100,7 @@ The `\` prefix inside an alias body (`cat=\cat -n`) means something different: i
   )
   ```
 
-  `SetEnv(...)`, `UnsetEnv(...)`, and `WithEnv(...)` entries may be listed the same way, and comma and newline separators can be mixed. Inside a multi-line definition, blank lines and lines starting with `#` or `;` are ignored, and an inline `#` comment may also follow the opening parenthesis or a candidate. A definition that reaches the end of the file with an unclosed `(` is an error. The POSIX shell fallback in `aliasc-fallback.sh` parses the same multi-line forms for `FirstAvailable`, `SetEnv`, `UnsetEnv`, and `WithEnv`, so behavior does not depend on whether the compiler binary is available.
+  `SetEnv(...)`, `UnsetEnv(...)`, and `WithEnv(...)` entries may be listed the same way, and comma and newline separators can be mixed. Inside a multi-line definition, blank lines and lines starting with `#` or `;` are ignored, and an inline `#` comment may also follow the opening parenthesis or a candidate. A definition that reaches the end of the file with an unclosed `(` is an error. The POSIX shell fallback in `alias-fallback.sh` parses the same multi-line forms for `FirstAvailable`, `SetEnv`, `UnsetEnv`, and `WithEnv`, so behavior does not depend on whether the compiler binary is available.
 - `?(...)` is a shorthand for `FirstAvailable(...)`: `cat=?(batcat, bat, cat)` is equivalent to `cat=FirstAvailable(batcat, bat, cat)`. A `?` anywhere other than immediately before the opening parenthesis at the start of a definition body is a literal character.
 - `[Windows]` is the v1 legacy cmd-template compatibility section; portable `SetEnv(...)`, `UnsetEnv(...)`, and `WithEnv(...)` templates are still parsed there. Shell-specific sections are reserved and inactive in v1.
 
@@ -194,28 +194,33 @@ Interactive profiles should source or install only the last successful generated
 
 Only the loader is shell-specific; fetching and compiling are not.
 
-```text
-~/.local/bin/aliasc-fetch.sh          fetcher (POSIX sh, shared)
-~/.local/share/aliasc/aliasc-core.sh  fetch + staleness + compile (POSIX sh, shared)
-~/.local/share/aliasc/aliasc-fallback.sh
-                                      degraded POSIX parser (POSIX activators only)
-```
+All glue ships in this repository; nothing is installed automatically. Add one
+line to the profile of each shell you use:
 
-Install one activator per shell you use:
-
-| Shell | Source from | Artifact |
+| Shell | Add to your profile | Artifact |
 | --- | --- | --- |
-| sh, bash, zsh | `~/.config/interactive.d/10-aliasc-activate.sh` | `alias.posix` |
-| fish | `~/.config/fish/conf.d/aliasc.fish` | `alias.fish` |
-| nushell | `source ~/.config/nushell/aliasc.nu` in `config.nu` | `alias.nu` |
-| PowerShell 5.1 / 7+ | `. ~/.config/powershell/aliasc.ps1` in `$PROFILE` | `alias.pwsh`, `alias.powershell` |
+| sh, bash, zsh | `. /path/to/aliasc/alias.sh` | `alias.posix` |
+| fish | `source /path/to/aliasc/alias.fish` | `alias.fish` |
+| nushell | `source /path/to/aliasc/alias.nu` in `config.nu` | `alias.nu` |
+| PowerShell 5.1 / 7+ | `. /path/to/aliasc/alias.ps1` in `$PROFILE` | `alias.pwsh`, `alias.powershell` |
 
-The fish, nushell, and PowerShell activators call `aliasc-core.sh` through `sh`
+Each activator finds its siblings next to itself, so a checkout needs no install
+step: `alias.sh` uses `${BASH_SOURCE}`/`${(%):-%x}`/`${.sh.file}`, `alias.fish`
+uses `status filename`, `alias.nu` uses `$env.CURRENT_FILE`, and `alias.ps1` uses
+`$PSScriptRoot`. `ALIASC_LIB_DIR` overrides the search when you keep the files
+apart.
+
+The fish, nushell, and PowerShell activators call `alias-core.sh` through `sh`
 rather than reimplementing download and staleness logic. PowerShell is the only
 one that duplicates that logic, because Windows cannot assume `/bin/sh`; set
 `ALIASC_BINARY` to an existing compiler to skip fetching there entirely.
 
-None of the non-POSIX activators has a fallback parser. `aliasc-fallback.sh`
+PowerShell also pins the target platform explicitly. The backend refuses to emit
+`powershell`/`pwsh` for a non-Windows target, so the activator passes
+`--platform windows` on Windows and reports the mismatch instead of compiling
+when it runs elsewhere (`ALIASC_PLATFORM` overrides).
+
+None of the non-POSIX activators has a fallback parser. `alias-fallback.sh`
 works by `eval`-ing POSIX function bodies, and fish (`set -gx`), nushell
 (`$env.X =`), and PowerShell (`$env:X =`) cannot consume those. When the compiler
 is unavailable they reuse the last good artifact instead of degrading further.
@@ -225,20 +230,20 @@ is unavailable they reuse the last good artifact instead of degrading further.
 ```text
 src/          Compiler, resolver, IR, backend, ShortcutMap adapter, SSH config reader, and manifest implementation
 
-aliasc-fetch.sh
+alias-fetch.sh
               Fetcher: downloads and caches the release binary, then execs it.
               POSIX sh only - every Unix shell can call it.
-aliasc-core.sh
+alias-core.sh
               Shared POSIX core: fetch compiler -> compare manifest inputs against
               the artifact -> compile -> print the artifact path. Never loads
               anything into a shell.
-aliasc-activate.sh / .fish / .nu / .ps1
+alias.sh / .fish / .nu / .ps1
               Per-shell activators: load the artifact into the CURRENT session.
               That part cannot be shared, because loading is shell-private
               (`source`, `.`, dot-sourcing, `Remove-Item Alias:`).
-aliasc-fallback.sh
-              POSIX-only degraded parser used by aliasc-activate.sh when no
-              compiler can be obtained.
+alias-fallback.sh
+              POSIX-only degraded parser used by alias.sh when no compiler can be
+              obtained.
 tests/        Fixture-driven integration tests
 fixtures/     Small DSL source fixtures
 scripts/      Manifest status and explicit rebuild helpers

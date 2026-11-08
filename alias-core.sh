@@ -1,5 +1,5 @@
 #!/bin/sh
-# aliasc-core.sh - shared POSIX core: fetch compiler -> check staleness -> compile.
+# alias-core.sh - shared POSIX core: fetch compiler -> check staleness -> compile.
 #
 # Responsibility: produce a fresh, shell-specific artifact and print its path
 # on stdout. It never loads anything into a shell: the per-shell activators do
@@ -10,16 +10,16 @@
 # (find, compare, spawn the compiler) and identical for every Unix shell, while
 # sh is guaranteed present wherever fish, nushell, bash, or zsh run. PowerShell
 # is the one exception - Windows has no reliable /bin/sh - so pwsh uses
-# aliasc-activate.ps1 instead of this script.
+# alias.ps1 instead of this script.
 #
 # Usage:
-#   sh aliasc-core.sh --shell NAME [options]
+#   sh alias-core.sh --shell NAME [options]
 #
 # Options:
 #   --shell NAME           Language to generate (posix|bash|zsh|fish|nu)
 #   --source PATH          Alias source (default $ALIAS_FILE, else ~/.config/alias)
 #   --cache-dir PATH       Artifact cache (default ${XDG_CACHE_HOME:-$HOME/.cache}/aliasc)
-#   --fetcher PATH         Fetcher script (default $HOME/.local/bin/aliasc-fetch.sh)
+#   --fetcher PATH         Fetcher script (default: next to this script)
 #   --platform VALUE       Passed to the compiler (default auto)
 #   --distro VALUE         Passed to the compiler (default auto)
 #   --environment VALUE    Passed to the compiler (default auto)
@@ -83,7 +83,21 @@ esac
 
 : "${source_file:=${ALIAS_FILE:-$HOME/.config/alias}}"
 : "${cache_dir:=${XDG_CACHE_HOME:-$HOME/.cache}/aliasc}"
-: "${fetcher:=${ALIASC_FETCHER:-$HOME/.local/bin/aliasc-fetch.sh}}"
+# The fetcher ships next to this script in the aliasc checkout, so look there
+# before falling back to a PATH-style install location.
+: "${fetcher:=${ALIASC_FETCHER:-}}"
+if [ -z "$fetcher" ]; then
+    __core_dir=${0%/*}
+    [ "$__core_dir" = "$0" ] && __core_dir=.
+    if [ -f "$__core_dir/alias-fetch.sh" ]; then
+        fetcher=$__core_dir/alias-fetch.sh
+    elif [ -f "$HOME/.local/bin/alias-fetch.sh" ]; then
+        fetcher=$HOME/.local/bin/alias-fetch.sh
+    else
+        fetcher=$HOME/proj/aliasc/alias-fetch.sh
+    fi
+    unset __core_dir
+fi
 
 [ -f "$source_file" ] || fail "alias source is missing: $source_file"
 [ -x "$fetcher" ] || fail "fetcher not found: $fetcher"

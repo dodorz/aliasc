@@ -26,12 +26,17 @@ if (-not $stale) {
   if (-not $compiler) { $stale = $true; $reason += 'compiler unavailable' }
   elseif ((Get-Item -LiteralPath $compiler.Source).LastWriteTimeUtc -gt (Get-Item -LiteralPath $Output).LastWriteTimeUtc) { $stale = $true; $reason += 'compiler newer' }
   foreach ($input in $manifest.inputs) {
-    $exists = Test-Path -LiteralPath $input.path -PathType Leaf
-    if ($exists -ne [bool]$input.exists) { $stale = $true; $reason += "input existence changed: $($input.path)"; continue }
-    if ($exists) {
-      $item = Get-Item -LiteralPath $input.path
-      if ($item.Length -ne [int64]$input.size -or (($item.LastWriteTimeUtc.Ticks - 621355968000000000) * 100) -ne [int64]$input.mtime_ns) { $stale = $true; $reason += "input changed: $($input.path)" }
+    # mtime_ns is the signal, not `exists`. The compiler records exists=true with
+    # mtime_ns=null for optional-but-positional inputs (a configured ShortcutMap
+    # or include that is absent), so comparing `exists` marks such a manifest
+    # stale forever.
+    if ($null -eq $input.mtime_ns) {
+      if (Test-Path -LiteralPath $input.path) { $stale = $true; $reason += "input appeared: $($input.path)" }
+      continue
     }
+    if (-not (Test-Path -LiteralPath $input.path -PathType Leaf)) { $stale = $true; $reason += "input missing: $($input.path)"; continue }
+    $item = Get-Item -LiteralPath $input.path
+    if ($item.Length -ne [int64]$input.size -or (($item.LastWriteTimeUtc.Ticks - 621355968000000000) * 100) -ne [int64]$input.mtime_ns) { $stale = $true; $reason += "input changed: $($input.path)" }
   }
   foreach ($generated in $manifest.outputs) { if (-not (Test-Path -LiteralPath $generated.path -PathType Leaf)) { $stale = $true; $reason += "generated output missing: $($generated.path)" } }
 }

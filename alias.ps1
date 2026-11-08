@@ -1,10 +1,10 @@
 #!/usr/bin/env pwsh
-# aliasc-activate.ps1 - PowerShell / pwsh activator.
+# alias.ps1 - PowerShell / pwsh activator.
 #
 # Responsibility: put the generated aliases into the CURRENT PowerShell session.
 #
 # Windows has no dependable /bin/sh, so this activator cannot reuse
-# aliasc-core.sh and implements the same three steps itself: fetch the compiler,
+# alias-core.sh and implements the same three steps itself: fetch the compiler,
 # compare the manifest inputs against the artifact, then compile and dot-source
 # the result.
 #
@@ -17,19 +17,39 @@
 # POSIX function bodies, which PowerShell cannot consume.
 #
 # Install from $PROFILE:
-#   . ~/.config/powershell/aliasc.ps1
+#   . ~/proj/aliasc/alias.ps1
 
 if ($env:ALIASDSL_NOLOAD -eq '1') { return }
 
-$libDir = if ($env:ALIASC_LIB_DIR) { $env:ALIASC_LIB_DIR }
-          elseif ($env:XDG_DATA_HOME) { Join-Path $env:XDG_DATA_HOME 'aliasc' }
-          else { Join-Path $HOME '.local/share/aliasc' }
-$fetcher = if ($env:ALIASC_FETCHER) { $env:ALIASC_FETCHER } else { Join-Path $HOME '.local/bin/aliasc-fetch.sh' }
+# These scripts live in the aliasc checkout and are installed by hand, so look
+# next to this file first instead of assuming a fixed install prefix.
+$libDir = $env:ALIASC_LIB_DIR
+if (-not $libDir) {
+    $candidates = @(
+        if ($PSScriptRoot) { $PSScriptRoot }
+        (Join-Path $HOME 'proj/aliasc')
+        if ($env:XDG_DATA_HOME) { Join-Path $env:XDG_DATA_HOME 'aliasc' } else { Join-Path $HOME '.local/share/aliasc' }
+    )
+    $libDir = $candidates | Where-Object { Test-Path -LiteralPath (Join-Path $_ 'alias-core.sh') -PathType Leaf } | Select-Object -First 1
+    if (-not $libDir) { $libDir = Join-Path $HOME 'proj/aliasc' }
+}
+$fetcher = if ($env:ALIASC_FETCHER) { $env:ALIASC_FETCHER } else { Join-Path $HOME '.local/bin/alias-fetch.sh' }
 $cacheDir = if ($env:ALIASC_CACHE_DIR) { $env:ALIASC_CACHE_DIR }
             elseif ($env:XDG_CACHE_HOME) { Join-Path $env:XDG_CACHE_HOME 'aliasc' }
             else { Join-Path $HOME '.cache/aliasc' }
 $sourceFile = if ($env:ALIAS_FILE) { $env:ALIAS_FILE } else { Join-Path $HOME '.config/alias' }
 $shellName = if ($PSVersionTable.PSEdition -eq 'Desktop') { 'powershell' } else { 'pwsh' }
+
+# The compiler refuses to emit powershell/pwsh for a non-Windows target, so the
+# platform must be explicit rather than 'auto' (which would resolve to the host).
+# $IsWindows/$IsMacOS/$IsLinux only exist on PowerShell 6+; Desktop edition is
+# always Windows.
+$platformName =
+    if ($env:ALIASC_PLATFORM) { $env:ALIASC_PLATFORM }
+    elseif ($PSVersionTable.PSEdition -eq 'Desktop') { 'windows' }
+    elseif ($IsWindows) { 'windows' }
+    elseif ($IsMacOS) { 'macos' }
+    else { 'linux' }
 
 function Write-AliascError([string]$Message) {
     [Console]::Error.WriteLine("aliasc: $Message")
@@ -77,6 +97,7 @@ function Test-ArtifactStale {
     try { $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json } catch { return $true }
 
     if ($manifest.target.shell -ne $shellName) { return $true }
+    if ($manifest.target.platform -ne $platformName) { return $true }
     if ($manifest.compiler.path -ne $binary) { return $true }
     if ((Test-Path -LiteralPath $binary -PathType Leaf) -and
         (Get-Item -LiteralPath $binary).LastWriteTimeUtc -gt (Get-Item -LiteralPath $artifact).LastWriteTimeUtc) { return $true }
@@ -101,16 +122,28 @@ function Test-ArtifactStale {
 if (-not (Test-Path -LiteralPath $cacheDir)) { New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null }
 
 if (Test-ArtifactStale) {
-    Write-AliascError "compiling $shellName artifact"
-    $arguments = @('compile', '--shell', $shellName, '--platform', 'auto', '--distro', 'auto',
-                   '--environment', 'auto', '--source', $sourceFile, '--output', $artifact)
-    & $binary @arguments > $null 2>&1
-    if ($LASTEXITCODE -ne 0) {
+    if ($platformName -ne 'windows') {
+        # Not something to work around: the backend genuinely has no non-Windows
+        # powershell target (see backend::generate). Say so once here instead of
+        # letting the compiler fail with a generic diagnostic.
         if (Test-Path -LiteralPath $artifact -PathType Leaf) {
-            Write-AliascError "compilation failed; reusing existing artifact $artifact"
+            Write-AliascError "powershell/pwsh aliases require a windows target; reusing existing artifact $artifact"
         } else {
-            Write-AliascError 'compilation failed; aliases are not loaded'
+            Write-AliascError 'powershell/pwsh aliases require a windows target; set ALIASC_PLATFORM=windows or skip this activator'
             return
+        }
+    } else {
+        Write-AliascError "compiling $shellName artifact"
+        $arguments = @('compile', '--shell', $shellName, '--platform', $platformName, '--distro', 'auto',
+                       '--environment', 'auto', '--source', $sourceFile, '--output', $artifact)
+        & $binary @arguments > $null 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            if (Test-Path -LiteralPath $artifact -PathType Leaf) {
+                Write-AliascError "compilation failed; reusing existing artifact $artifact"
+            } else {
+                Write-AliascError 'compilation failed; aliases are not loaded'
+                return
+            }
         }
     }
 }

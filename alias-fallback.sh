@@ -1,5 +1,5 @@
 #!/bin/sh
-# aliasc-fallback.sh - POSIX-only degraded parser, used when no compiler exists.
+# alias-fallback.sh - POSIX-only degraded parser, used when no compiler exists.
 #
 # Responsibility: turn the alias DSL into POSIX shell functions without the Rust
 # compiler. Slow and partial by design - it exists so a broken download never
@@ -12,7 +12,7 @@
 # backends in shell. When the compiler is missing, the non-POSIX activators
 # reuse the last good artifact instead.
 #
-# Sourced by aliasc-activate.sh. Provides __aliasc_fallback_load and friends.
+# Sourced by alias.sh. Provides __aliasc_fallback_load and friends.
 
 __aliasc_fallback_define_first_available() {
     __aliasc_fallback_name=$1

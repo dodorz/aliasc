@@ -1,26 +1,56 @@
 #!/bin/sh
-# aliasc-activate.sh - POSIX shell activator (bash, zsh, dash, sh).
+# alias.sh - POSIX shell activator (bash, zsh, dash, sh).
 #
 # Responsibility: put the generated aliases into the CURRENT shell. All the
 # shell-agnostic work (fetch compiler, staleness check, compile) lives in
-# aliasc-core.sh; this file only decides what to load and how.
+# alias-core.sh; this file only decides what to load and how.
 #
 # Unlike the fish/nu/pwsh activators this one carries a pure-shell parser
-# fallback (aliasc-fallback.sh), because POSIX function bodies can be eval-ed
+# fallback (alias-fallback.sh), because POSIX function bodies can be eval-ed
 # directly - the other shells cannot consume them.
 #
-# Install as: ~/.config/interactive.d/10-aliasc-activate.sh
+# Install it yourself from your shell profile, e.g.
+#   ~/.config/interactive.d/10-alias.sh  or  . ~/proj/aliasc/alias.sh
 
 if [ "${ALIASDSL_NOLOAD-}" = 1 ]; then
     return 0 2>/dev/null || exit 0
 fi
 
-: "${ALIASC_LIB_DIR:=${XDG_DATA_HOME:-$HOME/.local/share}/aliasc}"
-: "${ALIASC_CORE:=${ALIASC_LIB_DIR}/aliasc-core.sh}"
-: "${ALIASC_FALLBACK:=${ALIASC_LIB_DIR}/aliasc-fallback.sh}"
 : "${ALIASC_CACHE_DIR:=${XDG_CACHE_HOME:-$HOME/.cache}/aliasc}"
 : "${ALIASC_FETCHER:=}"
 : "${ALIAS_FILE:=$HOME/.config/alias}"
+
+# Locate the rest of the glue. These scripts live in the aliasc checkout and are
+# installed by hand, so find the directory this file was sourced from instead of
+# assuming a fixed install prefix.
+__aliasc_self=
+if [ -n "${BASH_SOURCE-}" ]; then
+    __aliasc_self=${BASH_SOURCE}
+elif [ -n "${ZSH_VERSION-}" ]; then
+    eval '__aliasc_self=${(%):-%x}'
+elif [ -n "${KSH_VERSION-}" ]; then
+    __aliasc_self=${.sh.file}
+fi
+__aliasc_self_dir=
+[ -n "$__aliasc_self" ] && __aliasc_self_dir=${__aliasc_self%/*}
+
+if [ -z "${ALIASC_LIB_DIR-}" ]; then
+    for __aliasc_candidate in \
+        "$__aliasc_self_dir" \
+        "$HOME/proj/aliasc" \
+        "${XDG_DATA_HOME:-$HOME/.local/share}/aliasc"; do
+        [ -n "$__aliasc_candidate" ] || continue
+        if [ -f "$__aliasc_candidate/alias-core.sh" ]; then
+            ALIASC_LIB_DIR=$__aliasc_candidate
+            break
+        fi
+    done
+fi
+unset __aliasc_self __aliasc_self_dir __aliasc_candidate
+
+: "${ALIASC_LIB_DIR:=${XDG_DATA_HOME:-$HOME/.local/share}/aliasc}"
+: "${ALIASC_CORE:=${ALIASC_LIB_DIR}/alias-core.sh}"
+: "${ALIASC_FALLBACK:=${ALIASC_LIB_DIR}/alias-fallback.sh}"
 
 # Sourced by an interactive shell, so plain `return` is the correct exit.
 __aliasc_activate() {

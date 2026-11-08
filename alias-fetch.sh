@@ -1,5 +1,5 @@
 #!/bin/sh
-# aliasc-fetch.sh - fetch (download + cache) the aliasc compiler binary.
+# alias-fetch.sh - fetch (download + cache) the aliasc compiler binary.
 #
 # Responsibility: binary provisioning ONLY. Never parses the alias DSL and
 # never writes shell code; it just guarantees that a matching release binary
@@ -8,7 +8,7 @@
 # Companion: aliasc-activate.sh (shell startup glue: compile + load).
 #
 # Usage:
-#   aliasc-fetch.sh [OPTIONS] [-- COMMAND...]
+#   alias-fetch.sh [OPTIONS] [-- COMMAND...]
 #
 # Options:
 #   --force              Force re-download even if binary already exists
