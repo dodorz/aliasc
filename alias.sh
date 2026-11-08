@@ -58,25 +58,24 @@ __aliasc_activate() {
         printf 'aliasc: alias source is missing: %s\n' "$ALIAS_FILE" >&2
         return 1
     fi
+    __aliasc_output=
     if [ ! -f "$ALIASC_CORE" ]; then
         printf 'aliasc: core not found: %s\n' "$ALIASC_CORE" >&2
-        return 1
-    fi
-
-    if [ -n "$ALIASC_FETCHER" ]; then
+    elif [ -n "$ALIASC_FETCHER" ]; then
         __aliasc_output=$(sh "$ALIASC_CORE" --shell posix --source "$ALIAS_FILE" \
             --cache-dir "$ALIASC_CACHE_DIR" --fetcher "$ALIASC_FETCHER")
     else
         __aliasc_output=$(sh "$ALIASC_CORE" --shell posix --source "$ALIAS_FILE" --cache-dir "$ALIASC_CACHE_DIR")
     fi
-    if [ $? -ne 0 ] || [ ! -f "$__aliasc_output" ]; then
+
+    if [ -z "$__aliasc_output" ] || [ ! -f "$__aliasc_output" ]; then
         if [ -f "$ALIASC_FALLBACK" ]; then
-            printf '%s\n' 'aliasc: core failed; using the shell fallback' >&2
+            printf '%s\n' 'aliasc: no artifact available; using the shell fallback' >&2
             . "$ALIASC_FALLBACK"
             __aliasc_fallback_load
             return 0
         fi
-        printf '%s\n' 'aliasc: core failed and no fallback is installed' >&2
+        printf '%s\n' 'aliasc: no artifact available and no fallback is installed' >&2
         return 1
     fi
 

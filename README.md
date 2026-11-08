@@ -225,6 +225,93 @@ works by `eval`-ing POSIX function bodies, and fish (`set -gx`), nushell
 (`$env.X =`), and PowerShell (`$env:X =`) cannot consume those. When the compiler
 is unavailable they reuse the last good artifact instead of degrading further.
 
+## Call Graph
+
+Seven files, one direction of control. Only the top layer touches the shell being
+started; everything below it is ordinary process spawning.
+
+```text
+  ~/.bashrc | ~/.shrc | config.fish | config.nu | $PROFILE
+              |
+              |  .  /  source
+              v
+  +--------------------------------------------------------------+
+  |  alias.sh     alias.fish     alias.nu     alias.ps1          |  activators
+  |  (sh/bash/    (fish)         (nushell)    (PowerShell 5.1/7)|  load into
+  |   zsh/dash)                                                  |  this session
+  +--------------------------------------------------------------+
+        |            |              |              |
+        |            +--------------+--------------+
+        |                       |
+        |            sh alias-core.sh --shell NAME --source FILE
+        |                           --cache-dir DIR [--fetcher PATH]
+        |                       |
+        |                       v
+        |            +----------------------+
+        |            |  alias-core.sh       |  fetch -> staleness -> compile
+        |            |  (POSIX, via sh)     |  prints artifact path on stdout
+        |            +----------------------+
+        |                       |
+        |                       | "$fetcher" --print-binary-path
+        |                       | "$fetcher"                (download)
+        |                       v
+        |            +----------------------+
+        |            |  alias-fetch.sh      |  platform probe, download,
+        |            |  (POSIX)             |  chmod, cache
+        |            +----------------------+
+        |                       |
+        |                       | exec
+        |                       v
+        |            aliasc (Rust compiler)
+        |                       |
+        |                       v
+        |            $XDG_CACHE_HOME/aliasc/alias.<shell>
+        |            $XDG_CACHE_HOME/aliasc/alias.<shell>.manifest.json
+        |
+        |  (POSIX only, when the core fails)
+        v
+  +----------------------+
+  |  alias-fallback.sh   |  parses the DSL with sh and eval;
+  |  (POSIX)             |  no compiler, no cache, no manifest
+  +----------------------+
+```
+
+`alias.ps1` is the exception to the layering: it cannot rely on `/bin/sh`, so it
+performs the core and fetcher steps itself in PowerShell, using
+`alias-fetch.sh` only when a `sh` is available and `ALIASC_BINARY` is unset.
+
+Step by step:
+
+1. **Activator.** The shell profile sources one file. Its only jobs are to find
+   its siblings, ask for an artifact path, and load that artifact into the
+   current session (`source`, `.`, dot-source, after dropping the previous
+   generation of functions).
+2. **Core** (`alias-core.sh`, POSIX, reached through `sh`). Resolves the
+   compiler, decides whether the cached artifact is stale by comparing the
+   manifest's `mtime_ns` inputs against the artifact, runs
+   `aliasc compile` when needed, and prints the artifact path on stdout. It
+   never loads anything.
+3. **Fetcher** (`alias-fetch.sh`, POSIX). `--print-binary-path` reports the
+   cached compiler; a bare invocation downloads it when missing. The core calls
+   it; an activator only calls it directly when the core is absent.
+4. **Compiler** (`aliasc`, Rust). Emits the artifact plus manifest. This is the
+   only component that understands the DSL.
+
+### Degraded paths
+
+| Situation | POSIX (`alias.sh`) | fish / nu / pwsh |
+| --- | --- | --- |
+| Compiler present, artifact fresh | load artifact | load artifact |
+| Compiler present, artifact stale | core recompiles, then load | core recompiles, then load |
+| Download fails, artifact exists | core reuses it | core reuses it |
+| Download fails, no artifact | `alias-fallback.sh` parses the DSL | error, no aliases loaded |
+| `alias-core.sh` missing | `alias-fallback.sh` parses the DSL | error, no aliases loaded |
+
+Only POSIX degrades into a parser. `alias-fallback.sh` builds POSIX function
+bodies with `eval`, which fish, nushell, and PowerShell cannot consume, so the
+other activators stop at "reuse the last good artifact" instead of lying about
+what they can produce.
+
 ## Repository Layout
 
 ```text
