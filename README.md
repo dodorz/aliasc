@@ -251,6 +251,12 @@ set, otherwise it looks beside itself, then in
 Both lists are install locations only - no path is hard-wired to a particular
 checkout.
 
+`dash` cannot report the file being sourced (`$0` is the shell itself, and it has
+none of `${BASH_SOURCE}`, `${(%):-%x}`, or `${.sh.file}`), so under `dash` only
+the data-directory candidate applies. Install the glue there, or export
+`ALIASC_LIB_DIR`, when `/bin/sh` is dash and you run `alias.sh` from dash
+directly.
+
 The fish, nushell, and PowerShell activators call `alias-core.sh` through `sh`
 rather than reimplementing download and staleness logic. PowerShell is the only
 one that duplicates that logic, because Windows cannot assume `/bin/sh`; set
