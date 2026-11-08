@@ -5,7 +5,10 @@
 # never writes shell code; it just guarantees that a matching release binary
 # exists in the cache and then execs it.
 #
-# Companion: aliasc-activate.sh (shell startup glue: compile + load).
+# If an `aliasc` (or `aliasc.exe`) executable sits next to this script, that
+# bundled compiler is used as-is and nothing is downloaded.
+#
+# Companion: alias-core.sh (compile) and alias.sh / .fish / .nu (load).
 #
 # Usage:
 #   alias-fetch.sh [OPTIONS] [-- COMMAND...]
@@ -95,6 +98,23 @@ __aliasc_download() {
     trap - EXIT HUP INT TERM
 }
 
+# A release bundle ships the compiler beside this script. Prefer it over any
+# download: a bundle install must work offline, and it pins the exact compiler
+# that was shipped with these glue scripts.
+bundled=
+__fetch_self=$0
+__fetch_dir=${__fetch_self%/*}
+[ "$__fetch_dir" = "$__fetch_self" ] && __fetch_dir=.
+__fetch_resolved=$(readlink -f "$__fetch_self" 2>/dev/null) || __fetch_resolved=
+[ -n "$__fetch_resolved" ] && __fetch_dir=${__fetch_resolved%/*}
+for __fetch_name in aliasc aliasc.exe; do
+    if [ -f "$__fetch_dir/$__fetch_name" ] && [ -x "$__fetch_dir/$__fetch_name" ]; then
+        bundled=$__fetch_dir/$__fetch_name
+        break
+    fi
+done
+unset __fetch_self __fetch_dir __fetch_resolved __fetch_name
+
 force=0
 platform=""
 
@@ -112,7 +132,10 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-if [ -n "$platform" ]; then
+if [ -n "$bundled" ]; then
+    # Bundle mode: the compiler needs no provisioning.
+    binary=$bundled
+elif [ -n "$platform" ]; then
     case "$platform" in
         linux-x86_64-gnu)    asset=aliasc-x86_64-unknown-linux-gnu ;;
         linux-x86_64-musl)   asset=aliasc-x86_64-unknown-linux-musl ;;
@@ -168,26 +191,30 @@ else
     esac
 fi
 
-[ -n "$asset" ] || fail "could not determine a release asset"
-mkdir -p "$cache_root" || fail "cannot create cache directory: $cache_root"
-binary=$cache_root/$asset
+if [ -z "$bundled" ]; then
+    [ -n "$asset" ] || fail "could not determine a release asset"
+    mkdir -p "$cache_root" || fail "cannot create cache directory: $cache_root"
+    binary=$cache_root/$asset
 
-if [ "$force" -eq 1 ] || [ ! -x "$binary" ]; then
-    __aliasc_download "$asset"
+    if [ "$force" -eq 1 ] || [ ! -x "$binary" ]; then
+        __aliasc_download "$asset"
 
-    case "$asset" in
-        *-unknown-linux-gnu)
-            if ! "$binary" --version >/dev/null 2>&1; then
-                printf '%s\n' "aliasc: gnu binary failed to run; falling back to musl" >&2
-                rm -f "$binary"
-                asset=aliasc-x86_64-unknown-linux-musl
-                binary=$cache_root/$asset
-                if [ ! -x "$binary" ]; then
-                    __aliasc_download "$asset"
+        # A gnu binary built against a newer glibc fails at exec time, not at
+        # download time, so fall back to musl rather than leaving a dead path.
+        case "$asset" in
+            *-unknown-linux-gnu)
+                if ! "$binary" --version >/dev/null 2>&1; then
+                    printf '%s\n' "aliasc: gnu binary failed to run; falling back to musl" >&2
+                    rm -f "$binary"
+                    asset=aliasc-x86_64-unknown-linux-musl
+                    binary=$cache_root/$asset
+                    if [ ! -x "$binary" ]; then
+                        __aliasc_download "$asset"
+                    fi
                 fi
-            fi
-            ;;
-    esac
+                ;;
+        esac
+    fi
 fi
 
 if [ $# -gt 0 ]; then

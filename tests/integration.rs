@@ -58,6 +58,65 @@ fn posix_fallback_supports_multiline_definitions() {
 
 #[cfg(unix)]
 #[test]
+fn fetcher_prefers_a_beside_the_script_compiler() {
+    use std::{os::unix::fs::PermissionsExt, process::Command};
+    let d=tempdir().unwrap(); let root=d.path();
+    let bundle=root.join("bundle"); fs::create_dir_all(&bundle).unwrap();
+    let script=bundle.join("alias-fetch.sh");
+    fs::copy(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("alias-fetch.sh"),&script).unwrap();
+    // A stand-in compiler: any executable that prints a version.
+    let compiler=bundle.join("aliasc");
+    fs::write(&compiler,"#!/bin/sh\necho 'aliasc 0.0.0-bundled'\n").unwrap();
+    fs::set_permissions(&compiler,fs::Permissions::from_mode(0o755)).unwrap();
+    // A dead cache dir proves no download is attempted.
+    let result=Command::new("sh").arg(&script).arg("--version")
+        .env("ALIASC_BINARY_CACHE_DIR",root.join("dead-cache"))
+        .output().unwrap();
+    assert!(result.status.success(),"{}",String::from_utf8_lossy(&result.stderr));
+    assert_eq!(String::from_utf8_lossy(&result.stdout).trim(),"aliasc 0.0.0-bundled");
+    assert!(!root.join("dead-cache").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn installer_copies_glue_and_restores_the_profile_on_uninstall() {
+    use std::{os::unix::fs::PermissionsExt, process::Command};
+    let d=tempdir().unwrap(); let root=d.path();
+    let repo=PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let bundle=root.join("bundle"); fs::create_dir_all(&bundle).unwrap();
+    for f in ["alias.sh","alias.fish","alias.nu","alias.ps1","alias-core.sh","alias-fetch.sh","alias-fallback.sh","alias-install.sh"] {
+        fs::copy(repo.join(f),bundle.join(f)).unwrap();
+    }
+    let compiler=bundle.join("aliasc");
+    fs::write(&compiler,"#!/bin/sh\nexit 0\n").unwrap();
+    fs::set_permissions(&compiler,fs::Permissions::from_mode(0o755)).unwrap();
+    let target=root.join("data/aliasc");
+    let profile=root.join("profile.sh");
+    fs::write(&profile,"export KEEP=1\n").unwrap();
+    let installer=bundle.join("alias-install.sh");
+    let status=Command::new("sh").arg(&installer)
+        .args(["--shell","bash","--dir"]).arg(&target)
+        .arg("--profile").arg(&profile)
+        .env("HOME",root).output().unwrap();
+    assert!(status.status.success(),"{}",String::from_utf8_lossy(&status.stderr));
+    assert!(target.join("alias.sh").is_file());
+    assert!(target.join("alias-core.sh").is_file());
+    assert!(target.join("aliasc").is_file());
+    let written=fs::read_to_string(&profile).unwrap();
+    assert!(written.contains("export KEEP=1"),"{written}");
+    assert!(written.contains("# aliasc (bash)"),"{written}");
+    assert!(written.contains(target.join("alias.sh").to_string_lossy().as_ref()),"{written}");
+    let removed=Command::new("sh").arg(&installer)
+        .args(["--shell","bash","--dir"]).arg(&target)
+        .arg("--profile").arg(&profile).arg("--uninstall")
+        .env("HOME",root).output().unwrap();
+    assert!(removed.status.success(),"{}",String::from_utf8_lossy(&removed.stderr));
+    assert!(!target.exists());
+    assert_eq!(fs::read_to_string(&profile).unwrap(),"export KEEP=1\n");
+}
+
+#[cfg(unix)]
+#[test]
 fn unix_fetcher_falls_back_from_curl_to_wget() {
     use std::{os::unix::fs::PermissionsExt, process::Command};
     let d=tempdir().unwrap(); let root=d.path();

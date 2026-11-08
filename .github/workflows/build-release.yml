@@ -62,36 +62,44 @@ jobs:
           - name: Windows x64
             os: windows-latest
             target: x86_64-pc-windows-msvc
-            asset: aliasc-x86_64-pc-windows-msvc.exe
+            asset: aliasc-x86_64-pc-windows-msvc
+            platform: windows-x86_64
           - name: Windows x86
             os: windows-latest
             target: i686-pc-windows-msvc
-            asset: aliasc-i686-pc-windows-msvc.exe
+            asset: aliasc-i686-pc-windows-msvc
+            platform: windows-i686
           - name: Windows ARM64
             os: windows-11-arm
             target: aarch64-pc-windows-msvc
-            asset: aliasc-aarch64-pc-windows-msvc.exe
+            asset: aliasc-aarch64-pc-windows-msvc
+            platform: windows-aarch64
           - name: macOS Intel
             os: macos-15-intel
             target: x86_64-apple-darwin
             asset: aliasc-x86_64-apple-darwin
+            platform: darwin-x86_64
           - name: macOS Apple Silicon
             os: macos-15
             target: aarch64-apple-darwin
             asset: aliasc-aarch64-apple-darwin
+            platform: darwin-aarch64
           - name: Linux x64
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             asset: aliasc-x86_64-unknown-linux-gnu
+            platform: linux-x86_64-gnu
           - name: Linux x64 (musl)
             os: ubuntu-latest
             target: x86_64-unknown-linux-musl
             asset: aliasc-x86_64-unknown-linux-musl
+            platform: linux-x86_64-musl
             musl: true
           - name: Android ARM64 (Termux)
             os: ubuntu-latest
             target: aarch64-linux-android
             asset: aliasc-aarch64-linux-android
+            platform: linux-aarch64-android
             android_ndk: true
 
     runs-on: ${{ matrix.os }}
@@ -140,15 +148,77 @@ jobs:
           file "target/${{ matrix.target }}/release/aliasc"
           ! readelf -l "target/${{ matrix.target }}/release/aliasc" | grep -q 'interpreter'
 
-      - name: Package Windows binary
+      # The bundle is the deliverable: compiler + glue + installer, archived as
+      # a single .7z. The bare binary is still emitted because alias-fetch.sh
+      # downloads it when the glue is installed outside a bundle.
+      - name: Assemble bundle (Unix)
+        if: runner.os != 'Windows' && !matrix.android_ndk
+        shell: bash
+        run: |
+          set -eu
+          stage="bundle/${{ matrix.asset }}"
+          mkdir -p "$stage"
+          cp "target/${{ matrix.target }}/release/aliasc" "$stage/aliasc"
+          cp alias.sh alias.fish alias.nu alias.ps1 \
+             alias-core.sh alias-fetch.sh alias-fallback.sh \
+             alias-install.sh "$stage/"
+          chmod 0755 "$stage/aliasc" "$stage/alias-install.sh" "$stage/alias-fetch.sh"
+          cp "$stage/aliasc" "${{ matrix.asset }}"
+
+      - name: Assemble bundle (Android)
+        if: matrix.android_ndk
+        shell: bash
+        run: |
+          set -eu
+          stage="bundle/${{ matrix.asset }}"
+          mkdir -p "$stage"
+          cp "target/${{ matrix.target }}/release/aliasc" "$stage/aliasc"
+          cp alias.sh alias.fish alias.nu alias.ps1 \
+             alias-core.sh alias-fetch.sh alias-fallback.sh \
+             alias-install.sh "$stage/"
+          chmod 0755 "$stage/aliasc" "$stage/alias-install.sh" "$stage/alias-fetch.sh"
+          cp "$stage/aliasc" "${{ matrix.asset }}"
+
+      # A Windows bundle carries the executable plus the PowerShell glue only:
+      # alias.ps1 self-contained (no /bin/sh needed), alias-install.ps1 installs it.
+      - name: Assemble bundle (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Copy-Item "target/${{ matrix.target }}/release/aliasc.exe" "${{ matrix.asset }}"
+        run: |
+          $stage = "bundle/${{ matrix.asset }}"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/aliasc.exe" (Join-Path $stage 'aliasc.exe')
+          foreach ($f in @('alias.ps1','alias-install.ps1')) {
+            Copy-Item $f (Join-Path $stage $f)
+          }
+          Copy-Item (Join-Path $stage 'aliasc.exe') "${{ matrix.asset }}.exe"
 
-      - name: Package Unix binary
+      - name: Create 7z bundle (Unix)
         if: runner.os != 'Windows'
         shell: bash
-        run: cp "target/${{ matrix.target }}/release/aliasc" "${{ matrix.asset }}"
+        run: |
+          set -eu
+          if ! command -v 7z >/dev/null 2>&1; then
+            if command -v brew >/dev/null 2>&1; then brew install --quiet p7zip
+            elif command -v apt-get >/dev/null 2>&1; then sudo apt-get update && sudo apt-get install -y p7zip-full
+            elif command -v dnf >/dev/null 2>&1; then sudo dnf install -y p7zip
+            fi
+          fi
+          ( cd "bundle/${{ matrix.asset }}" && 7z a -t7z -mx=9 "../../${{ matrix.asset }}.7z" . >/dev/null )
+
+      - name: Create 7z bundle (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $sevenZip = if (Get-Command 7z -ErrorAction SilentlyContinue) { '7z' } else { "$env:ProgramFiles\7-Zip\7z.exe" }
+          if (-not (Test-Path $sevenZip) -and -not (Get-Command 7z -ErrorAction SilentlyContinue)) {
+            choco install 7zip.install -y --no-progress
+            $sevenZip = "$env:ProgramFiles\7-Zip\7z.exe"
+          }
+          Push-Location "bundle/${{ matrix.asset }}"
+          & $sevenZip a -t7z -mx=9 "../../${{ matrix.asset }}.7z" . | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "7z failed with $LASTEXITCODE" }
+          Pop-Location
 
       - name: Verify Windows release binary version
         if: github.ref_type == 'tag' && runner.os == 'Windows'
@@ -178,12 +248,26 @@ jobs:
             exit 1
           }
 
-      - name: Upload binary
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset }}
-          path: ${{ matrix.asset }}
+          # The .7z is the deliverable. The bare binary stays in the release so
+          # alias-fetch.sh can still bootstrap a glue-only install.
+          path: |
+            ${{ matrix.asset }}.7z
           if-no-files-found: error
+
+      # The bare binaries stay in the release so `alias-fetch.sh` can still
+      # bootstrap a glue-only install, and so Scoop manifests keep working.
+      - name: Upload bare binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}-binary
+          path: |
+            ${{ matrix.asset }}
+            ${{ matrix.asset }}.exe
+          if-no-files-found: warn
 
   release:
     name: Publish GitHub release
@@ -206,6 +290,29 @@ jobs:
         shell: bash
         run: |
           (cd dist && sha256sum aliasc-* > checksums.txt)
+
+      - name: Verify every platform produced a bundle
+        shell: bash
+        run: |
+          set -eu
+          expected=(
+            aliasc-x86_64-pc-windows-msvc
+            aliasc-i686-pc-windows-msvc
+            aliasc-aarch64-pc-windows-msvc
+            aliasc-x86_64-apple-darwin
+            aliasc-aarch64-apple-darwin
+            aliasc-x86_64-unknown-linux-gnu
+            aliasc-x86_64-unknown-linux-musl
+            aliasc-aarch64-linux-android
+          )
+          status=0
+          for name in "${expected[@]}"; do
+            if [[ ! -f "dist/$name.7z" ]]; then
+              echo "missing bundle: dist/$name.7z" >&2
+              status=1
+            fi
+          done
+          exit $status
 
       - name: Create release
         uses: softprops/action-gh-release@v2

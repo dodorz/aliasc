@@ -190,6 +190,61 @@ scripts/aliasc-rebuild.ps1
 
 Interactive profiles should source or install only the last successful generated artifact. Rebuild operations belong outside the shell startup path.
 
+## Release Bundle
+
+Each release publishes one `.7z` per platform instead of a loose binary:
+
+```
+aliasc-x86_64-unknown-linux-gnu.7z
+├── aliasc                 compiled compiler for that platform
+├── alias.sh               POSIX activator (sh, bash, zsh, dash)
+├── alias.fish             fish activator
+├── alias.nu               nushell activator
+├── alias.ps1              PowerShell activator
+├── alias-core.sh          shared fetch -> staleness -> compile core
+├── alias-fetch.sh         fetcher (uses ./aliasc from the bundle, no download)
+├── alias-fallback.sh      POSIX degraded parser
+└── alias-install.sh       installer
+```
+
+Windows bundles are `aliasc.exe` plus `alias.ps1` and `alias-install.ps1`; the
+POSIX glue is omitted there because the PowerShell activator needs no `/bin/sh`.
+
+Every bundle is self-contained: `alias-fetch.sh` finds the compiler beside
+itself and skips downloading entirely, so a bundle install works offline.
+
+### Installing from a bundle
+
+```sh
+7z x aliasc-x86_64-unknown-linux-gnu.7z -oaliasc
+cd aliasc
+./alias-install.sh --shell fish           # prints the profile line
+./alias-install.sh --shell bash --profile ~/.bashrc
+```
+
+```powershell
+7z x aliasc-x86_64-pc-windows-msvc.7z -oaliasc
+cd aliasc
+.\alias-install.ps1 -Shell pwsh                       # prints the profile line
+.\alias-install.ps1 -Shell pwsh -Profile $PROFILE
+```
+
+| Option | Effect |
+| --- | --- |
+| `--shell NAME` | `posix`, `bash`, `zsh`, `fish`, `nu`, `pwsh`. Defaults to `$SHELL`. |
+| `--dir PATH` | Install location. Default `${XDG_DATA_HOME:-~/.local/share}/aliasc`. |
+| `--profile FILE` | Append the activation line. Nothing is written without it. |
+| `--no-compiler` | Install the glue only; the fetcher downloads the compiler later. |
+| `--uninstall` | Remove the glue, and the profile block when `--profile` is given. |
+| `--force` | Overwrite an existing install. |
+| `--dry-run` | Print what would happen. |
+
+All glue files are installed regardless of `--shell`; only the activation line
+differs. `--uninstall --profile` restores the profile byte-for-byte.
+
+The bare binaries are still published beside each `.7z` so `alias-fetch.sh` can
+bootstrap a glue-only install and so Scoop manifests keep working.
+
 ## Shell Integration
 
 Only the loader is shell-specific; fetching and compiling are not.
@@ -378,6 +433,10 @@ alias.sh / .fish / .nu / .ps1
 alias-fallback.sh
               POSIX-only degraded parser used by alias.sh when no compiler can be
               obtained.
+alias-install.sh / alias-install.ps1
+              Installer shipped in the release bundle: copies the glue (and the
+              bundled compiler) into one directory and writes the activation
+              line for the chosen shell.
 tests/        Fixture-driven integration tests
 fixtures/     Small DSL source fixtures
 scripts/      Manifest status and explicit rebuild helpers
