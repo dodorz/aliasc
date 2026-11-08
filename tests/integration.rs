@@ -79,6 +79,31 @@ fn fetcher_prefers_a_beside_the_script_compiler() {
 
 #[cfg(unix)]
 #[test]
+fn bundle_zip_records_the_executable_bit() {
+    use std::{os::unix::fs::PermissionsExt, process::Command};
+    let d=tempdir().unwrap(); let root=d.path();
+    let stage=root.join("stage"); fs::create_dir_all(&stage).unwrap();
+    let exe=stage.join("aliasc");
+    fs::write(&exe,"#!/bin/sh\nexit 0\n").unwrap();
+    fs::set_permissions(&exe,fs::Permissions::from_mode(0o755)).unwrap();
+    let plain=stage.join("alias-core.sh");
+    fs::write(&plain,"#!/bin/sh\n").unwrap();
+    fs::set_permissions(&plain,fs::Permissions::from_mode(0o644)).unwrap();
+    let zip=root.join("bundle.zip");
+    let script=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tools/zip-bundle.py");
+    let python=if Command::new("python3").arg("--version").output().is_ok(){"python3"}else{"python"};
+    let result=Command::new(python).arg(&script).arg(&stage).arg(&zip).output().unwrap();
+    assert!(result.status.success(),"{}",String::from_utf8_lossy(&result.stderr));
+    let unzip=Command::new("unzip").arg("-q").arg(&zip).arg("-d").arg(root.join("out")).output().unwrap();
+    assert!(unzip.status.success(),"{}",String::from_utf8_lossy(&unzip.stderr));
+    let out=root.join("out");
+    let mode=|name:&str| fs::metadata(out.join(name)).unwrap().permissions().mode() & 0o111 != 0;
+    assert!(mode("aliasc"),"aliasc lost its executable bit");
+    assert!(!mode("alias-core.sh"),"alias-core.sh must stay non-executable");
+}
+
+#[cfg(unix)]
+#[test]
 fn installer_copies_glue_and_restores_the_profile_on_uninstall() {
     use std::{os::unix::fs::PermissionsExt, process::Command};
     let d=tempdir().unwrap(); let root=d.path();

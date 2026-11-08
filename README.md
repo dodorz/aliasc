@@ -192,10 +192,10 @@ Interactive profiles should source or install only the last successful generated
 
 ## Release Bundle
 
-Each release publishes one `.7z` per platform instead of a loose binary:
+Each release publishes one `.zip` per platform instead of a loose binary:
 
 ```
-aliasc-x86_64-unknown-linux-gnu.7z
+aliasc-x86_64-unknown-linux-gnu.zip
 ├── aliasc                 compiled compiler for that platform
 ├── alias.sh               POSIX activator (sh, bash, zsh, dash)
 ├── alias.fish             fish activator
@@ -210,20 +210,25 @@ aliasc-x86_64-unknown-linux-gnu.7z
 Windows bundles are `aliasc.exe` plus `alias.ps1` and `alias-install.ps1`; the
 POSIX glue is omitted there because the PowerShell activator needs no `/bin/sh`.
 
+Zip, not 7z: every platform can already open a zip (Explorer, `unzip`, `bsdtar`),
+so installing never depends on a third-party extractor. Unix bundles store the
+executable bit on `aliasc`, `alias-fetch.sh`, and `alias-install.sh`; Windows
+bundles hold only `.exe` and `.ps1` files, where modes are irrelevant.
+
 Every bundle is self-contained: `alias-fetch.sh` finds the compiler beside
 itself and skips downloading entirely, so a bundle install works offline.
 
 ### Installing from a bundle
 
 ```sh
-7z x aliasc-x86_64-unknown-linux-gnu.7z -oaliasc
+unzip -d aliasc aliasc-x86_64-unknown-linux-gnu.zip
 cd aliasc
 ./alias-install.sh --shell fish           # prints the profile line
 ./alias-install.sh --shell bash --profile ~/.bashrc
 ```
 
 ```powershell
-7z x aliasc-x86_64-pc-windows-msvc.7z -oaliasc
+Expand-Archive aliasc-x86_64-pc-windows-msvc.zip -DestinationPath aliasc
 cd aliasc
 .\alias-install.ps1 -Shell pwsh                       # prints the profile line
 .\alias-install.ps1 -Shell pwsh -Profile $PROFILE
@@ -242,7 +247,7 @@ cd aliasc
 All glue files are installed regardless of `--shell`; only the activation line
 differs. `--uninstall --profile` restores the profile byte-for-byte.
 
-The bare binaries are still published beside each `.7z` so `alias-fetch.sh` can
+The bare binaries are still published beside each `.zip` so `alias-fetch.sh` can
 bootstrap a glue-only install and so Scoop manifests keep working.
 
 ## Shell Integration
@@ -440,6 +445,7 @@ alias-install.sh / alias-install.ps1
 tests/        Fixture-driven integration tests
 fixtures/     Small DSL source fixtures
 scripts/      Manifest status and explicit rebuild helpers
+tools/        Release helpers (zip-bundle.py: reproducible bundle zip without zip(1))
 .github/      GitHub Actions shell-matrix workflow
 ```
 

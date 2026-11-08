@@ -149,8 +149,11 @@ jobs:
           ! readelf -l "target/${{ matrix.target }}/release/aliasc" | grep -q 'interpreter'
 
       # The bundle is the deliverable: compiler + glue + installer, archived as
-      # a single .7z. The bare binary is still emitted because alias-fetch.sh
-      # downloads it when the glue is installed outside a bundle.
+      # a single .zip. Zip rather than 7z because every platform can extract it
+      # with what it already ships (Explorer, unzip, bsdtar); 7z would make
+      # extraction on Windows depend on a third-party install.
+      # The bare binary is still emitted because alias-fetch.sh downloads it
+      # when the glue is installed outside a bundle.
       - name: Assemble bundle (Unix)
         if: runner.os != 'Windows' && !matrix.android_ndk
         shell: bash
@@ -193,32 +196,30 @@ jobs:
           }
           Copy-Item (Join-Path $stage 'aliasc.exe') "${{ matrix.asset }}.exe"
 
-      - name: Create 7z bundle (Unix)
+      - name: Create zip bundle (Unix)
         if: runner.os != 'Windows'
         shell: bash
         run: |
           set -eu
-          if ! command -v 7z >/dev/null 2>&1; then
-            if command -v brew >/dev/null 2>&1; then brew install --quiet p7zip
-            elif command -v apt-get >/dev/null 2>&1; then sudo apt-get update && sudo apt-get install -y p7zip-full
-            elif command -v dnf >/dev/null 2>&1; then sudo dnf install -y p7zip
-            fi
+          name="${{ matrix.asset }}"
+          if command -v zip >/dev/null 2>&1; then
+            # -X drops extra attributes so the archive is reproducible.
+            ( cd "bundle/$name" && zip -r -X -9 "../../$name.zip" . >/dev/null )
+          else
+            # Fallback for runners without zip(1): Python is always present and
+            # records the Unix modes explicitly, which zip(1) also does here.
+            python3 tools/zip-bundle.py "bundle/$name" "$name.zip"
           fi
-          ( cd "bundle/${{ matrix.asset }}" && 7z a -t7z -mx=9 "../../${{ matrix.asset }}.7z" . >/dev/null )
 
-      - name: Create 7z bundle (Windows)
+      - name: Create zip bundle (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $sevenZip = if (Get-Command 7z -ErrorAction SilentlyContinue) { '7z' } else { "$env:ProgramFiles\7-Zip\7z.exe" }
-          if (-not (Test-Path $sevenZip) -and -not (Get-Command 7z -ErrorAction SilentlyContinue)) {
-            choco install 7zip.install -y --no-progress
-            $sevenZip = "$env:ProgramFiles\7-Zip\7z.exe"
-          }
-          Push-Location "bundle/${{ matrix.asset }}"
-          & $sevenZip a -t7z -mx=9 "../../${{ matrix.asset }}.7z" . | Out-Null
-          if ($LASTEXITCODE -ne 0) { throw "7z failed with $LASTEXITCODE" }
-          Pop-Location
+          $name = "${{ matrix.asset }}"
+          # Compress-Archive ships with PowerShell 5.1+, so no external tool is
+          # needed. It does not record Unix modes, which is irrelevant for a
+          # bundle holding only aliasc.exe and .ps1 files.
+          Compress-Archive -Path "bundle/$name/*" -DestinationPath "$name.zip" -CompressionLevel Optimal -Force
 
       - name: Verify Windows release binary version
         if: github.ref_type == 'tag' && runner.os == 'Windows'
@@ -252,10 +253,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset }}
-          # The .7z is the deliverable. The bare binary stays in the release so
-          # alias-fetch.sh can still bootstrap a glue-only install.
+          # The .zip is the deliverable. The bare binary stays in the release
+          # so alias-fetch.sh can still bootstrap a glue-only install.
           path: |
-            ${{ matrix.asset }}.7z
+            ${{ matrix.asset }}.zip
           if-no-files-found: error
 
       # The bare binaries stay in the release so `alias-fetch.sh` can still
@@ -307,8 +308,8 @@ jobs:
           )
           status=0
           for name in "${expected[@]}"; do
-            if [[ ! -f "dist/$name.7z" ]]; then
-              echo "missing bundle: dist/$name.7z" >&2
+            if [[ ! -f "dist/$name.zip" ]]; then
+              echo "missing bundle: dist/$name.zip" >&2
               status=1
             fi
           done
