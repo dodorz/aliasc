@@ -363,9 +363,3 @@ __aliasc_fallback_load() {
         command "$@"
     }
 }
-
-__aliasc_wait_after_error() {
-    printf '%s' 'aliasc: press Enter to continue ...' >&2
-    IFS= read -r
-    printf '\n' >&2
-}
