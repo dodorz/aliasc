@@ -12,6 +12,11 @@ class Aliasc < Formula
   # The release zips bundle the compiler together with the glue scripts, so
   # installing one archive is enough for a fully offline setup: the fetcher
   # finds the compiler beside itself and never downloads.
+  # The class-level URL doubles as the fallback brew requires so the formula
+  # parses on every platform combination; unsupported ones bail in #install.
+  url "https://github.com/dodorz/aliasc/releases/download/#{version}/aliasc-x86_64-unknown-linux-gnu.zip"
+  sha256 "e4537bbc7a0c148e1fba22e991673b52f5342cfb6be3c8a60b843c0c5919e55d"
+
   on_macos do
     on_arm do
       url "https://github.com/dodorz/aliasc/releases/download/#{version}/aliasc-aarch64-apple-darwin.zip"
@@ -22,16 +27,15 @@ class Aliasc < Formula
       sha256 "a3195258787028bc1860679d117ffdd678f06013c951fb81b6442e44785f9f29"
     end
   end
-  on_linux do
-    on_intel do
-      url "https://github.com/dodorz/aliasc/releases/download/#{version}/aliasc-x86_64-unknown-linux-gnu.zip"
-      sha256 "e4537bbc7a0c148e1fba22e991673b52f5342cfb6be3c8a60b843c0c5919e55d"
-    end
-    # Linux ARM64 has no glibc asset yet (only an Android/Termux binary), so no
-    # on_arm block here; brew reports the missing URL clearly on that platform.
-  end
 
   def install
+    # No glibc aarch64 asset exists yet (upstream ships Android/Termux only);
+    # fail here instead of installing an x86_64 binary that cannot exec.
+    # Adding a linux-aarch64 target to build-release.yml removes this guard.
+    if OS.linux? && Hardware::CPU.arm?
+      odie "aliasc does not ship a Linux ARM64 build yet (see the release assets)"
+    end
+
     # The glue must stay together in one directory: each activator locates its
     # siblings beside itself, and alias-core.sh finds alias-fetch.sh the same
     # way. libexec keeps these support scripts out of PATH while opt_libexec
