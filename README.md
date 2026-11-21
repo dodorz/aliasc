@@ -220,11 +220,12 @@ itself and skips downloading entirely, so a bundle install works offline.
 
 ### Installing from Homebrew
 
-On macOS and Linuxbrew, a tap installs the compiler and the glue together, so
-the profile only needs one line (like starship):
+This repository doubles as its own Homebrew tap (`Formula/` at the root), so on
+macOS and Linuxbrew one install puts the compiler and the glue in place and the
+profile only needs one line (like starship):
 
 ```sh
-brew tap dodorz/aliasc https://github.com/dodorz/homebrew-tap
+brew tap dodorz/aliasc https://github.com/dodorz/aliasc
 brew install aliasc
 ```
 
@@ -237,7 +238,13 @@ The caveats then print the exact line for each shell, anchored at
 ```
 
 The compiler is installed beside the glue in `libexec`, so everything
-(including recompiles) works offline. See `packaging/homebrew/README.md`.
+(including recompiles) works offline.
+
+Release ordering matters because the tap points at release assets while the
+formula itself is read from this repository's default branch: tag and publish
+the release first, then commit the formula's `version`/`sha256` bump (take the
+zip checksums from `checksums.txt`). `brew livecheck aliasc` tracks new
+releases via `strategy :github_latest`.
 
 ### Installing from a bundle
 
