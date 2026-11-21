@@ -218,6 +218,27 @@ bundles hold only `.exe` and `.ps1` files, where modes are irrelevant.
 Every bundle is self-contained: `alias-fetch.sh` finds the compiler beside
 itself and skips downloading entirely, so a bundle install works offline.
 
+### Installing from Homebrew
+
+On macOS and Linuxbrew, a tap installs the compiler and the glue together, so
+the profile only needs one line (like starship):
+
+```sh
+brew tap dodorz/aliasc https://github.com/dodorz/homebrew-tap
+brew install aliasc
+```
+
+The caveats then print the exact line for each shell, anchored at
+`opt_libexec` so it survives upgrades:
+
+```sh
+# bash/zsh/sh
+. "$(brew --prefix)/opt/aliasc/libexec/alias.sh"
+```
+
+The compiler is installed beside the glue in `libexec`, so everything
+(including recompiles) works offline. See `packaging/homebrew/README.md`.
+
 ### Installing from a bundle
 
 ```sh
