@@ -37,6 +37,39 @@ fn posix_alias_name_and_lowercase_variant_execute_the_same_definition() {
 }
 #[cfg(unix)]
 #[test]
+fn run_executes_definitions_across_the_shell_boundary() {
+    use std::process::Command;
+    let d=tempdir().unwrap(); let source=d.path().join("alias");
+    fs::write(&source,"[Common]\ncat=?(no-such-aliasc-candidate, echo)\nfly=WithEnv(HELLO=world) printenv HELLO\nsetv=SetEnv(HELLO=one)\ncode3=exit 3\n").unwrap();
+    let bin=env!("CARGO_BIN_EXE_aliasc");
+    let run=|extra:&[&str]| {
+        let mut c=Command::new(bin); c.arg("run").arg("--source").arg(&source);
+        for x in extra { c.arg(x); }
+        c.output().unwrap()
+    };
+    // FirstAvailable resolves the installed candidate and passes arguments through.
+    let out=run(&["cat","hello","world"]);
+    assert!(out.status.success(),"{}",String::from_utf8_lossy(&out.stderr));
+    assert_eq!(String::from_utf8_lossy(&out.stdout),"hello world\n");
+    // WithEnv scopes environment variables for the executed command.
+    let out=run(&["fly"]);
+    assert!(out.status.success(),"{}",String::from_utf8_lossy(&out.stderr));
+    assert_eq!(String::from_utf8_lossy(&out.stdout),"world\n");
+    // SetEnv definitions have no command to execute.
+    let out=run(&["setv"]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("has no command to run"));
+    // Child exit codes propagate.
+    let out=run(&["code3"]);
+    assert_eq!(out.status.code(),Some(3));
+    // Arguments after `--` may contain hyphen-leading values.
+    let out=run(&["cat","--","--flag"]);
+    assert!(out.status.success(),"{}",String::from_utf8_lossy(&out.stderr));
+    assert_eq!(String::from_utf8_lossy(&out.stdout),"--flag\n");
+}
+
+#[cfg(unix)]
+#[test]
 fn posix_fallback_supports_multiline_definitions() {
     use std::{os::unix::fs::PermissionsExt, process::{Command,Stdio}};
     let d=tempdir().unwrap(); let root=d.path();

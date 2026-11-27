@@ -135,7 +135,26 @@ aliasc validate --shell pwsh --platform windows --source C:\path\to\alias
 aliasc list --shell bash --platform linux --source ...        # 名字（--format tsv：名字<TAB>body）
 aliasc search --shell bash --platform linux --source ... proxy
 aliasc explain --shell bash --platform linux --source ... pkg  # 某个别名展开成什么
+aliasc run update -- --deep            # 在任何 shell 之外执行某个定义
 ```
+
+### 在 shell 之外运行别名
+
+Shell 函数不会跨越进程边界，直接 exec 程序的父进程（`sudo`、`env`、`xargs`、
+cron、`ssh host cmd`）都看不见你的别名。`aliasc run NAME [-- args...]` 弥补
+这个缺口：它按当前目标上下文解析定义（生效段、`FirstAvailable` 探测、
+`WithEnv`），然后在全新的 `sh` 里执行。`aliasc` 本身就是 PATH 上的真实
+二进制，所以 `sudo` 乐意运行它：
+
+```sh
+sudo aliasc run update-system
+sudo aliasc run pip -- install -U rich
+sudo "$(command -v aliasc)" run backup   # 当 brew bin 不在 sudo 的 secure_path 里时
+```
+
+`--source` 默认取 `$ALIAS_FILE`，再退到 `~/.config/alias`；子进程退出码原样
+传播。`SetEnv`/`UnsetEnv` 定义没有可执行命令，会被拒绝。（远端主机是部署
+问题：需要远端自己装 aliasc 或同步 shim。）
 
 `--shell` 接受 `posix`、`bash`、`zsh`、`fish`、`nu`、`powershell`/`pwsh`、
 `cmd`。`powershell`/`pwsh` 要求 Windows 目标上下文；任意宿主机都支持交叉
@@ -200,6 +219,9 @@ raw ls --all      # 运行外部 ls，忽略别名
 `ls.exe` 或 `& (Get-Command ls -CommandType Application).Path`（PowerShell）、
 `cmd /c ls`（cmd）。POSIX shell 上 `\ls` **不是**绕过——aliasc 生成的是
 函数，反斜杠只影响 alias 展开，所以它仍会执行别名函数体。
+
+对于函数无法跨越的进程边界（`sudo`、cron、`xargs`），使用 `aliasc run`——
+见[在 shell 之外运行别名](#在-shell-之外运行别名)。
 
 ## 环境变量
 

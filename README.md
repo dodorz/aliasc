@@ -146,7 +146,28 @@ aliasc validate --shell pwsh --platform windows --source C:\path\to\alias
 aliasc list --shell bash --platform linux --source ...        # names (--format tsv: name<TAB>body)
 aliasc search --shell bash --platform linux --source ... proxy
 aliasc explain --shell bash --platform linux --source ... pkg  # what an alias expands to
+aliasc run update -- --deep            # execute a definition outside any shell
 ```
+
+### Running aliases outside the shell
+
+Shell functions do not cross process boundaries, so parents that exec programs
+directly never see your aliases: `sudo`, `env`, `xargs`, cron, `ssh host cmd`.
+`aliasc run NAME [-- args...]` closes that gap: it resolves the definition for
+the current target context (sections, `FirstAvailable` probing, `WithEnv`)
+and executes it in a fresh `sh`. Because `aliasc` itself is a real binary on
+PATH, `sudo` is happy to run it:
+
+```sh
+sudo aliasc run update-system
+sudo aliasc run pip -- install -U rich
+sudo "$(command -v aliasc)" run backup   # when the brew bin is not in sudo's secure_path
+```
+
+`--source` defaults to `$ALIAS_FILE`, then `~/.config/alias`; child exit codes
+propagate. `SetEnv`/`UnsetEnv` definitions have no command to execute and are
+rejected. (Remote hosts are a deployment concern: they need their own aliasc
+or shim copy.)
 
 `--shell` accepts `posix`, `bash`, `zsh`, `fish`, `nu`, `powershell`/`pwsh`,
 `cmd`. `powershell`/`pwsh` require a Windows target context; cross-compilation
@@ -214,6 +235,9 @@ Per-shell native spellings: `command ls` (POSIX shells, fish), `^ls`
 (PowerShell), `cmd /c ls` (cmd). On POSIX shells `\ls` is *not* a bypass —
 aliasc emits functions, and a backslash only affects alias expansion, so it
 still runs the alias body.
+
+For process boundaries that functions cannot cross (`sudo`, cron, `xargs`),
+use `aliasc run` — see [Running aliases outside the shell](#running-aliases-outside-the-shell).
 
 ## Environment variables
 

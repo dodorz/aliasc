@@ -4,10 +4,57 @@ use std::{path::PathBuf, process::ExitCode};
 
 #[derive(Parser)] #[command(name="aliasc", version=env!("ALIASC_VERSION"), about="Alias DSL v2 compiler")]
 struct Cli { #[command(subcommand)] command: Command }
-#[derive(Subcommand)] enum Command { Compile { #[command(flatten)] input: Input, #[arg(long)] output:PathBuf }, Validate { #[command(flatten)] input:Input }, List { #[command(flatten)] input:Input, #[arg(long,value_enum,default_value="name")] format:ListFormat }, Search { #[command(flatten)] input:Input, #[arg(required=true)] pattern:Vec<String> }, Explain { #[command(flatten)] input:Input, name:String } }
+#[derive(Subcommand)] enum Command { Compile { #[command(flatten)] input: Input, #[arg(long)] output:PathBuf }, Validate { #[command(flatten)] input:Input }, List { #[command(flatten)] input:Input, #[arg(long,value_enum,default_value="name")] format:ListFormat }, Search { #[command(flatten)] input:Input, #[arg(required=true)] pattern:Vec<String> }, Explain { #[command(flatten)] input:Input, name:String }, Run { #[command(flatten)] input: RunInput } }
+
+/// Arguments for `aliasc run`. Unlike the other subcommands the shell is not
+/// configurable: definitions always execute through the POSIX backend in a
+/// fresh `sh`, which is what lets them cross process boundaries (sudo, env,
+/// cron). `--source` is optional so `sudo aliasc run x` stays short.
+#[derive(Args,Clone)] struct RunInput { #[arg(long)] source:Option<PathBuf>, #[arg(long,default_value="auto",value_enum)] platform:PlatformArg, #[arg(long,default_value="auto")] distro:DistroArg, #[arg(long,default_value="auto")] environment:EnvironmentArg, #[arg(long)] no_local:bool, #[arg(long,conflicts_with="no_shortcut_map")] shortcut_map:Option<PathBuf>, #[arg(long)] no_shortcut_map:bool, name:String, #[arg(trailing_var_arg=true,allow_hyphen_values=true)] args:Vec<String> }
 #[derive(Args,Clone)] struct Input { #[arg(long,value_enum)] shell:Shell, #[arg(long,default_value="auto",value_enum)] platform:PlatformArg, #[arg(long,default_value="auto")] distro:DistroArg, #[arg(long,default_value="auto")] environment:EnvironmentArg, #[arg(long)] source:PathBuf, #[arg(long)] no_local:bool, #[arg(long,conflicts_with="no_shortcut_map")] shortcut_map:Option<PathBuf>, #[arg(long)] no_shortcut_map:bool }
-fn main()->ExitCode { let cli=Cli::parse();let (input,action)=match cli.command {Command::Compile{input,output}=>(input,Action::Compile(output)),Command::Validate{input}=>(input,Action::Validate),Command::List{input,format}=>(input,Action::List(format)),Command::Search{input,pattern}=>(input,Action::Search(pattern)),Command::Explain{input,name}=>(input,Action::Explain(name))};let context=Context::resolve(input.shell,input.platform,input.distro,input.environment);let default_shortcut_map=input.shortcut_map.unwrap_or_else(||aliasc::default_shortcut_map(&input.source));let options=CompileOptions{context,source:input.source,local:!input.no_local,shortcut_map:if input.no_shortcut_map{None}else{Some(default_shortcut_map)}};let model=match compile_model(&options){Ok(x)=>x,Err(d)=>{print_diags(&d);return ExitCode::FAILURE}};print_diags(&model.diagnostics);match action {Action::Validate=>ExitCode::SUCCESS,Action::List(format)=>{for d in &model.definitions{match format{ListFormat::Name=>println!("{}",d.name),ListFormat::Tsv=>println!("{}\t{}",d.name,escape_tsv(&backend::display_body(&d.body)))}}ExitCode::SUCCESS},Action::Search(pattern)=>{let pat=pattern.iter().map(|x|x.to_ascii_lowercase()).collect::<Vec<_>>();for d in &model.definitions{if pat.iter().all(|p|d.name.to_ascii_lowercase().contains(p)){println!("{}\t{}",d.name,d.span)}}ExitCode::SUCCESS},Action::Explain(name)=>{match model.definitions.iter().find(|d|d.name.eq_ignore_ascii_case(&name)){Some(d)=>{println!("name: {}\nsource: {}\nmode: {}",d.name,d.span,if d.legacy{"legacy-cmd"}else{"portable"});ExitCode::SUCCESS},None=>{eprintln!("aliasc: definition `{name}` is not active for this target context");ExitCode::FAILURE}}},Action::Compile(output)=>{let generated=match backend::generate(&model.context,&model.definitions){Ok(x)=>x,Err(d)=>{print_diags(&d);return ExitCode::FAILURE}};match manifest::write_outputs(&output,&model,generated){Ok(())=>ExitCode::SUCCESS,Err(e)=>{eprintln!("aliasc: {}: {e}",output.display());ExitCode::FAILURE}}}} }
+fn main()->ExitCode { let cli=Cli::parse();let (input,action)=match cli.command {Command::Compile{input,output}=>(input,Action::Compile(output)),Command::Validate{input}=>(input,Action::Validate),Command::List{input,format}=>(input,Action::List(format)),Command::Search{input,pattern}=>(input,Action::Search(pattern)),Command::Explain{input,name}=>(input,Action::Explain(name)),Command::Run{input}=>{return run_definition(&input)}};let context=Context::resolve(input.shell,input.platform,input.distro,input.environment);let default_shortcut_map=input.shortcut_map.unwrap_or_else(||aliasc::default_shortcut_map(&input.source));let options=CompileOptions{context,source:input.source,local:!input.no_local,shortcut_map:if input.no_shortcut_map{None}else{Some(default_shortcut_map)}};let model=match compile_model(&options){Ok(x)=>x,Err(d)=>{print_diags(&d);return ExitCode::FAILURE}};print_diags(&model.diagnostics);match action {Action::Validate=>ExitCode::SUCCESS,Action::List(format)=>{for d in &model.definitions{match format{ListFormat::Name=>println!("{}",d.name),ListFormat::Tsv=>println!("{}\t{}",d.name,escape_tsv(&backend::display_body(&d.body)))}}ExitCode::SUCCESS},Action::Search(pattern)=>{let pat=pattern.iter().map(|x|x.to_ascii_lowercase()).collect::<Vec<_>>();for d in &model.definitions{if pat.iter().all(|p|d.name.to_ascii_lowercase().contains(p)){println!("{}\t{}",d.name,d.span)}}ExitCode::SUCCESS},Action::Explain(name)=>{match model.definitions.iter().find(|d|d.name.eq_ignore_ascii_case(&name)){Some(d)=>{println!("name: {}\nsource: {}\nmode: {}",d.name,d.span,if d.legacy{"legacy-cmd"}else{"portable"});ExitCode::SUCCESS},None=>{eprintln!("aliasc: definition `{name}` is not active for this target context");ExitCode::FAILURE}}},Action::Compile(output)=>{let generated=match backend::generate(&model.context,&model.definitions){Ok(x)=>x,Err(d)=>{print_diags(&d);return ExitCode::FAILURE}};match manifest::write_outputs(&output,&model,generated){Ok(())=>ExitCode::SUCCESS,Err(e)=>{eprintln!("aliasc: {}: {e}",output.display());ExitCode::FAILURE}}}} }
 enum Action{Compile(PathBuf),Validate,List(ListFormat),Search(Vec<String>),Explain(String)}
+
+/// Execute one definition outside the current shell. The definition is
+/// compiled through the POSIX backend and run in a fresh `sh` as a real
+/// function call, so parents that exec programs directly (`sudo`, `env`,
+/// `xargs`, cron) see exactly what the interactive alias would do.
+fn run_definition(input:&RunInput)->ExitCode {
+    let source=input.source.clone()
+        .or_else(||std::env::var("ALIAS_FILE").ok().map(PathBuf::from))
+        .unwrap_or_else(||std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join(".config").join("alias"));
+    if !source.is_file() {
+        eprintln!("aliasc: alias source is missing: {}",source.display());
+        return ExitCode::FAILURE;
+    }
+    // The target context decides which sections are active; the shell is
+    // always posix because that is the backend `run` executes through.
+    let context=Context::resolve(Shell::Posix,input.platform,input.distro.clone(),input.environment.clone());
+    let default_shortcut_map=input.shortcut_map.clone().unwrap_or_else(||aliasc::default_shortcut_map(&source));
+    let options=CompileOptions{context,source,local:!input.no_local,shortcut_map:if input.no_shortcut_map{None}else{Some(default_shortcut_map)}};
+    let model=match compile_model(&options){Ok(x)=>x,Err(d)=>{print_diags(&d);return ExitCode::FAILURE}};
+    print_diags(&model.diagnostics);
+    let Some(def)=model.definitions.iter().find(|d|d.name.eq_ignore_ascii_case(&input.name)) else {
+        eprintln!("aliasc: definition `{}` is not active for this target context",input.name);
+        return ExitCode::FAILURE;
+    };
+    match def.template {
+        aliasc::dsl::Template::SetEnv(_)|aliasc::dsl::Template::UnsetEnv(_) => {
+            eprintln!("aliasc: `{}` manages environment variables and has no command to run; source it inside a shell instead",input.name);
+            return ExitCode::FAILURE;
+        }
+        _ => {}
+    }
+    let generated=match backend::generate(&model.context,std::slice::from_ref(def)){
+        Ok(x)=>x,
+        Err(d)=>{print_diags(&d);return ExitCode::FAILURE}
+    };
+    let script=format!("{}\n{} \"$@\"\n",generated.primary,def.name);
+    match std::process::Command::new("sh").arg("-c").arg(&script).arg(&def.name).args(&input.args).status() {
+        Ok(status)=>ExitCode::from(status.code().unwrap_or(1) as u8),
+        Err(e)=>{eprintln!("aliasc: cannot execute sh: {e}");ExitCode::FAILURE}
+    }
+}
 #[derive(Clone,Copy,ValueEnum)] enum ListFormat{Name,Tsv}
 fn escape_tsv(s:&str)->String{let mut out=String::with_capacity(s.len());for c in s.chars(){match c{'\\'=>out.push_str("\\\\"),'\t'=>out.push_str("\\t"),'\n'=>out.push_str("\\n"),'\r'=>out.push_str("\\r"),_=>out.push(c)}}out}
 fn print_diags(diags:&[aliasc::Diagnostic]){
