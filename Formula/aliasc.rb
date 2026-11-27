@@ -1,7 +1,7 @@
 class Aliasc < Formula
   desc "Compile a small alias DSL into per-shell alias definitions (bash/zsh/fish/nushell/pwsh)"
   homepage "https://github.com/dodorz/aliasc"
-  version "0.2.2"
+  version "0.2.3"
   license "MIT"
 
   livecheck do
@@ -15,16 +15,16 @@ class Aliasc < Formula
   # The class-level URL doubles as the fallback brew requires so the formula
   # parses on every platform combination; unsupported ones bail in #install.
   url "https://github.com/dodorz/aliasc/releases/download/#{version}/aliasc-x86_64-unknown-linux-gnu.zip"
-  sha256 "e4537bbc7a0c148e1fba22e991673b52f5342cfb6be3c8a60b843c0c5919e55d"
+  sha256 "a217cfd83633a774f15f62c2e59edb9a2e6fb03ba1f38a4605ccf13fce2741f3"
 
   on_macos do
     on_arm do
       url "https://github.com/dodorz/aliasc/releases/download/#{version}/aliasc-aarch64-apple-darwin.zip"
-      sha256 "8a162a282da5eb1e77a3ac4891d07c10a4d5f04793ad759f050e43bb8aa17c44"
+      sha256 "0a03b2adc143eac4bf7797d522d883aba18d13f2cb510bb9792053e0e49fa248"
     end
     on_intel do
       url "https://github.com/dodorz/aliasc/releases/download/#{version}/aliasc-x86_64-apple-darwin.zip"
-      sha256 "a3195258787028bc1860679d117ffdd678f06013c951fb81b6442e44785f9f29"
+      sha256 "f7b3b088581d65cfb22ce8b1c0faf53e9ec3b5a52bb364615aef9e35caa6beda"
     end
   end
 
